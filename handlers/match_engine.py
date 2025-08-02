@@ -89,3 +89,23 @@ async def action_pass(cb: CallbackQuery):
         await cb.message.answer(f"🤝 Team {team} passed successfully!")
     save_json(MATCH_FILE, match)
     await next_turn(cb.message)
+
+# ✅ END MATCH COMMAND
+@router.message(Command("end_match"))
+async def end_match(msg: types.Message):
+    teams = load_json(TEAMS_FILE)
+    if msg.from_user.id != teams.get("referee"):
+        return await msg.answer("Only Referee can end the match.")
+    
+    match = load_json(MATCH_FILE)
+    score_a = match["score"]["A"]
+    score_b = match["score"]["B"]
+
+    if score_a > score_b:
+        winner = "Team A"
+    elif score_b > score_a:
+        winner = "Team B"
+    else:
+        winner = "DRAW"
+
+    await msg.answer(f"🏁 Match Ended!\n\nFinal Score:\nTeam A {score_a} - {score_b} Team B\n🏆 Winner: {winner}")
