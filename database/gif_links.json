@@ -1,0 +1,7 @@
+{
+  "kick": ["https://your-kick-gif-link"],
+  "defensive": ["https://your-defensive-gif-link"],
+  "pass": ["https://your-pass-gif-link"],
+  "goal": ["https://your-goal-gif-link"],
+  "steal": ["https://your-steal-gif-link"]
+}
