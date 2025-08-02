@@ -1,27 +1,35 @@
 import logging
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, Chat
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Chat
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# ✅ Logging
+# ✅ Imports from game
+from game.team_mode import handle_team_mode, create_team
+from game.tournament import (
+    handle_tournament_mode,
+    create_tournament,
+    total_team,
+    team_members,
+    register_team,
+    join_team
+)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TOKEN = "7496362823:AAHpnck9YF3HmaPU7lYIOqKMD1TfpHirUmE"
+TOKEN = "YOUR_BOT_TOKEN"
 
-# ✅ Utility to check group
+# ✅ Group check
 async def is_group(update: Update):
     return update.effective_chat.type in [Chat.GROUP, Chat.SUPERGROUP]
 
-# ✅ Start Command
+# ✅ /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_group(update):
-        return  # DM में कुछ नहीं करेगा
-    await update.message.reply_text("✅ Football Bot Active in this group! Use /start_football")
+    if not await is_group(update): return
+    await update.message.reply_text("✅ Football Bot Active! Use /start_football")
 
-# ✅ Start Football
+# ✅ /start_football
 async def start_football(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_group(update):
-        return
+    if not await is_group(update): return
     keyboard = [
         [InlineKeyboardButton("🏆 Tournament Mode", callback_data="tournament_mode")],
         [InlineKeyboardButton("👥 Team Mode", callback_data="team_mode")],
@@ -32,40 +40,32 @@ async def start_football(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query.message.chat.type not in [Chat.GROUP, Chat.SUPERGROUP]:
-        await query.answer()  # DM में ignore
-        return
+        await query.answer(); return
     await query.answer()
+
     if query.data == "tournament_mode":
-        await query.message.reply_text("🏆 Tournament Mode selected!\nUse /create_tournament to start.")
+        await handle_tournament_mode(query)
     elif query.data == "team_mode":
-        await query.message.reply_text("👥 Team Mode selected!\nReferee use /create_team to start team setup.")
-
-# ✅ Tournament Commands (Only Groups)
-async def create_tournament(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_group(update):
-        return
-    await update.message.reply_text("🏆 Tournament Created!\nNow use /total_team <number>")
-
-async def total_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_group(update):
-        return
-    await update.message.reply_text("✅ Total Teams set!\nUse /team_members <min>-<max>")
-
-async def team_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_group(update):
-        return
-    await update.message.reply_text("✅ Team size set! Registration started.")
+        await handle_team_mode(query)
 
 # ✅ Main
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
 
+    # 🔹 Start commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("start_football", start_football))
     app.add_handler(CallbackQueryHandler(button_handler))
+
+    # 🔹 Tournament commands (सही क्रम में)
     app.add_handler(CommandHandler("create_tournament", create_tournament))
     app.add_handler(CommandHandler("total_team", total_team))
     app.add_handler(CommandHandler("team_members", team_members))
+    app.add_handler(CommandHandler("register_team", register_team))  # ✅ Added
+    app.add_handler(CommandHandler("join_team", join_team))          # ✅ Added
 
-    print("✅ Bot Running (Only Groups)...")
+    # 🔹 Team mode commands
+    app.add_handler(CommandHandler("create_team", create_team))
+
+    print("✅ Football Bot Running...")
     app.run_polling(allowed_updates=["message", "chat_member", "callback_query"])
