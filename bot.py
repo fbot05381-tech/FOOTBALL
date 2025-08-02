@@ -1,31 +1,42 @@
 import os
 import logging
-from telegram.ext import ApplicationBuilder
-from handlers import start, team_mode, tournament_mode, referee, gameplay
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import ContextTypes
 
-# ✅ Logging for debugging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ✅ Bot Token from environment
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN")
 
-if not BOT_TOKEN:
-    raise ValueError("❌ BOT_TOKEN not set! Please set environment variable before running.")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("✅ Bot Active! Use /start_football")
 
-# ✅ Create Telegram Application
-app = ApplicationBuilder().token(BOT_TOKEN).build()
+async def start_football(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("🏆 Tournament Mode", callback_data="tournament_mode")],
+        [InlineKeyboardButton("👥 Team Mode", callback_data="team_mode")]
+    ]
+    await update.message.reply_text("⚽ Choose Game Mode:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# ✅ Register all command & callback handlers
-start.register_handlers(app)
-team_mode.register_handlers(app)
-tournament_mode.register_handlers(app)
-referee.register_handlers(app)
-gameplay.register_handlers(app)
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    logger.info(f"Callback Query Received: {data}")
 
-# ✅ Main entry point
+    if data == "tournament_mode":
+        await query.message.reply_text("🏆 Tournament Mode selected!")
+    elif data == "team_mode":
+        await query.message.reply_text("👥 Team Mode selected!")
+
 if __name__ == "__main__":
-    logger.info("✅ Football Game Bot is running...")
+    if not TOKEN:
+        raise ValueError("BOT_TOKEN not set!")
+
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("start_football", start_football))
+    app.add_handler(CallbackQueryHandler(callback_handler))
+    logger.info("✅ Bot running...")
     app.run_polling()
