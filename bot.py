@@ -1,10 +1,8 @@
-import logging, importlib, os
+import logging, importlib, os, asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram import F
-import asyncio
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_TOKEN_HERE")
 
@@ -14,7 +12,7 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(storage=MemoryStorage())
 
-# ✅ Auto load handlers
+# ✅ Auto load all handlers
 for file in os.listdir("handlers"):
     if file.endswith(".py"):
         importlib.import_module(f"handlers.{file[:-3]}")
@@ -25,8 +23,6 @@ async def set_commands():
         BotCommand(command="create_team", description="Create Teams"),
         BotCommand(command="add_member", description="Add Member Manually"),
         BotCommand(command="shift_member", description="Shift Member"),
-        BotCommand(command="resign_referee", description="Resign Referee"),
-        BotCommand(command="vote_referee", description="Vote to Change Referee"),
         BotCommand(command="start_match", description="Start Match"),
         BotCommand(command="end_match", description="End Match"),
         BotCommand(command="captain", description="Choose Captain"),
