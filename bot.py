@@ -8,7 +8,6 @@ import logging
 import importlib
 import os
 
-# Load Config
 with open("config.json") as f:
     CONFIG = json.load(f)
 
@@ -18,15 +17,13 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(storage=MemoryStorage())
 
-# Load Handlers dynamically
+# Dynamic handlers import
 for file in os.listdir("handlers"):
     if file.endswith(".py"):
         importlib.import_module(f"handlers.{file[:-3]}")
 
 async def set_commands():
-    commands = [
-        BotCommand(command="start_football", description="Start Football Bot")
-    ]
+    commands = [BotCommand(command="start_football", description="Start Football Bot")]
     await bot.set_my_commands(commands)
 
 async def main():
