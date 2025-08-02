@@ -1,3 +1,2 @@
 aiogram==3.4.1
-pyrogram==2.0.106
-cryptography==40.0.2
+python-dotenv==1.0.1
