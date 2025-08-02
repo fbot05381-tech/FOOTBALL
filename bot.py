@@ -7,32 +7,32 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
-# ✅ Tumhara bot token direct yahan daal diya
 BOT_TOKEN = "8237073959:AAGoZT6Th4nhLF2t_QgXmqnRMqvKQgMYS70"
 
-# Logging enable
 logging.basicConfig(level=logging.INFO)
+logging.info("🚀 Starting Football Bot...")
 
-# Bot aur Dispatcher setup
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(storage=MemoryStorage())
 
-# ✅ Handlers auto import (handlers/ folder ke sabhi files)
-for file in os.listdir("handlers"):
+# ✅ Handlers import
+handlers_path = "handlers"
+logging.info(f"📂 Loading handlers from {handlers_path}")
+for file in os.listdir(handlers_path):
     if file.endswith(".py"):
-        importlib.import_module(f"handlers.{file[:-3]}")
+        module = f"handlers.{file[:-3]}"
+        importlib.import_module(module)
+        logging.info(f"✅ Loaded handler: {module}")
 
-# ✅ Commands set karne ka function
 async def set_commands():
     commands = [BotCommand(command="start_football", description="Start Football Bot")]
     await bot.set_my_commands(commands)
+    logging.info("✅ Commands registered")
 
-# ✅ Main function
 async def main():
     await set_commands()
-    logging.info("✅ Football Bot is running...")
+    logging.info("✅ Football Bot is running and polling started...")
     await dp.start_polling(bot)
 
-# ✅ Script entry
 if __name__ == "__main__":
     asyncio.run(main())
