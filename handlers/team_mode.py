@@ -5,11 +5,9 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from utils.db import load_json, save_json
 
 router = Router()
-
 DATA_DIR = "database"
 TEAMS_FILE = os.path.join(DATA_DIR, "teams.json")
 
-# Team Mode Selection
 @router.callback_query(F.data == "team_mode")
 async def select_team_mode(cb: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -17,14 +15,12 @@ async def select_team_mode(cb: CallbackQuery):
     ])
     await cb.message.answer("Team Mode Selected!\nClick below to become the Referee:", reply_markup=kb)
 
-# Referee Selection
 @router.callback_query(F.data == "be_referee")
 async def become_referee(cb: CallbackQuery):
     teams = {"referee": cb.from_user.id, "team_a": [], "team_b": [], "captains": {}, "goalkeepers": {}}
     save_json(TEAMS_FILE, teams)
     await cb.message.answer("You are now the Referee!\nUse /create_team to create teams.")
 
-# Create Teams
 @router.message(commands=["create_team"])
 async def create_team(msg: Message):
     teams = load_json(TEAMS_FILE)
@@ -39,7 +35,6 @@ async def create_team(msg: Message):
     ])
     await msg.answer("Teams created!\nPlayers click below to join:", reply_markup=kb)
 
-# Join Teams
 @router.callback_query(F.data.startswith("join_"))
 async def join_team(cb: CallbackQuery):
     team = cb.data.split("_")[1]
@@ -59,7 +54,6 @@ async def join_team(cb: CallbackQuery):
     save_json(TEAMS_FILE, teams)
     await cb.message.answer(f"{user['name']} joined FOOTBALL TEAM {team}!")
 
-# Set Captain
 @router.message(commands=["set_captain"])
 async def set_captain(msg: Message):
     args = msg.text.split()
@@ -72,7 +66,6 @@ async def set_captain(msg: Message):
     save_json(TEAMS_FILE, teams)
     await msg.answer(f"Captain set: {args[1]}")
 
-# Set GK
 @router.message(commands=["gk"])
 async def set_goalkeeper(msg: Message):
     args = msg.text.split()
