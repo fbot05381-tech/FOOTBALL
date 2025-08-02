@@ -1,164 +1,99 @@
-import os
-import random
-import asyncio
-from aiogram import Router, F, types
+import os, random, asyncio, time
+from aiogram import Router, types
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from utils.db import load_json, save_json
 
 router = Router()
 DATA_DIR = "database"
 TEAMS_FILE = os.path.join(DATA_DIR, "teams.json")
-MATCH_FILE = os.path.join(DATA_DIR, "matches.json")
 
-# ✅ Start Match
+ROUND_TIME = 15 * 60  # 15 min (can adjust)
+MOVE_TIMEOUT = 15
+
 @router.message(Command("start_match"))
 async def start_match(msg: types.Message):
     teams = load_json(TEAMS_FILE)
     if msg.from_user.id != teams.get("referee"):
         return await msg.answer("Only Referee can start the match.")
-    if len(teams["team_a"]) < 1 or len(teams["team_b"]) < 1:
-        return await msg.answer("Both teams must have players.")
+    if teams.get("game_started"):
+        return await msg.answer("Game already started!")
 
-    match = {
-        "round": 1,
-        "ball_possession": None,
-        "score": {"A": 0, "B": 0},
-        "active_player": None,
-        "afk_timer": 15
-    }
-    save_json(MATCH_FILE, match)
+    teams["game_started"] = True
+    save_json(TEAMS_FILE, teams)
 
-    await msg.answer("🏁 Match starting in 3 rounds of 15 minutes each!")
-    for i in ["3️⃣", "2️⃣", "1️⃣", "🏆"]:
-        await msg.answer(f"Match starts in {i}")
-        await asyncio.sleep(1)
+    await msg.answer("🏁 Match Starting in 3...2...1...")
+    await asyncio.sleep(3)
+    await msg.answer("🪙 Tossing coin for ball possession...")
 
-    toss_result = random.choice(["A", "B"])
-    match["ball_possession"] = toss_result
-    save_json(MATCH_FILE, match)
-    await msg.answer(f"🎲 Toss complete! Team {toss_result} gets the ball first!")
-    await next_turn(msg)
+    cap_a = teams.get("captain_a")
+    cap_b = teams.get("captain_b")
 
-# ✅ Next Turn
-async def next_turn(msg: types.Message):
-    match = load_json(MATCH_FILE)
-    team = match["ball_possession"]
+    if not cap_a or not cap_b:
+        return await msg.answer("Both teams must have captains using /captain @username")
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⚽ Kick", callback_data="action_kick")],
-        [InlineKeyboardButton(text="🛡️ Defensive", callback_data="action_defensive")],
-        [InlineKeyboardButton(text="🤝 Pass", callback_data="action_pass")]
-    ])
-    await msg.answer(f"Team {team} has the ball!\nChoose your move (15s):", reply_markup=kb)
+    toss_winner = random.choice([cap_a, cap_b])
+    teams["ball"] = toss_winner
+    save_json(TEAMS_FILE, teams)
 
-    # ✅ Start AFK timer
-    asyncio.create_task(check_afk(msg))
+    await msg.answer(f"🎉 Ball goes to <b>{toss_winner}</b>! Use KICK/DEFENSIVE/PASS to play.")
 
-# ✅ AFK CHECK
-async def check_afk(msg: types.Message):
-    await asyncio.sleep(15)
-    match = load_json(MATCH_FILE)
-    if match.get("active_player") is None:
-        await msg.answer("⏱️ No move made in 15s! Penalty shootout triggered!")
-        await penalty_shootout(msg)
-
-# ✅ Penalty Shootout
-async def penalty_shootout(msg: types.Message):
-    shooter_num = random.randint(1,5)
-    gk_num = random.randint(1,5)
-
-    await msg.answer("🎯 Penalty Shootout!\nGuess a number between 1–5...")
-
-    if shooter_num != gk_num:
-        match = load_json(MATCH_FILE)
-        team = match["ball_possession"]
-        match["score"][team] += 1
-        save_json(MATCH_FILE, match)
-        await msg.answer(f"🥅 Penalty GOAL! Score: {match['score']['A']} - {match['score']['B']}")
-    else:
-        await msg.answer("🧤 Penalty SAVED!")
-
-# ✅ KICK Action
-@router.callback_query(F.data == "action_kick")
-async def action_kick(cb: CallbackQuery):
-    match = load_json(MATCH_FILE)
-    teams = load_json(TEAMS_FILE)
-    team = match["ball_possession"]
-    gk_team = "A" if team == "B" else "B"
-
-    match["active_player"] = cb.from_user.id
-    save_json(MATCH_FILE, match)
-
-    shooter_num = random.randint(1,5)
-    gk_id = teams.get(f"gk_{gk_team}")
-    gk_num = random.randint(1,5)
-
-    if shooter_num != gk_num:
-        match["score"][team] += 1
-        await cb.message.answer(f"🥅 GOAL for Team {team}! Score: {match['score']['A']} - {match['score']['B']}")
-    else:
-        await cb.message.answer(f"🧤 SAVED by Team {gk_team}'s Goalkeeper!")
-
-    match["ball_possession"] = gk_team
-    match["active_player"] = None
-    save_json(MATCH_FILE, match)
-    await next_turn(cb.message)
-
-# ✅ Defensive Action
-@router.callback_query(F.data == "action_defensive")
-async def action_defensive(cb: CallbackQuery):
-    match = load_json(MATCH_FILE)
-    team = match["ball_possession"]
-
-    match["active_player"] = cb.from_user.id
-    save_json(MATCH_FILE, match)
-
-    if random.choice([True, False]):
-        match["ball_possession"] = "A" if team == "B" else "B"
-        await cb.message.answer("😱 Ball stolen by opposite team!")
-    else:
-        await cb.message.answer(f"🛡️ Team {team} kept the ball safely!")
-
-    match["active_player"] = None
-    save_json(MATCH_FILE, match)
-    await next_turn(cb.message)
-
-# ✅ Pass Action
-@router.callback_query(F.data == "action_pass")
-async def action_pass(cb: CallbackQuery):
-    match = load_json(MATCH_FILE)
-    team = match["ball_possession"]
-
-    match["active_player"] = cb.from_user.id
-    save_json(MATCH_FILE, match)
-
-    if random.choice([True, False]):
-        match["ball_possession"] = "A" if team == "B" else "B"
-        await cb.message.answer("🚨 Opponent intercepted the pass!")
-    else:
-        await cb.message.answer(f"🤝 Team {team} passed successfully!")
-
-    match["active_player"] = None
-    save_json(MATCH_FILE, match)
-    await next_turn(cb.message)
-
-# ✅ END MATCH
 @router.message(Command("end_match"))
 async def end_match(msg: types.Message):
     teams = load_json(TEAMS_FILE)
     if msg.from_user.id != teams.get("referee"):
         return await msg.answer("Only Referee can end the match.")
 
-    match = load_json(MATCH_FILE)
-    score_a = match["score"].get("A", 0)
-    score_b = match["score"].get("B", 0)
+    teams["game_started"] = False
+    save_json(TEAMS_FILE, teams)
+    await msg.answer("⏹️ Match Ended.")
 
-    if score_a > score_b:
-        winner = "Team A"
-    elif score_b > score_a:
-        winner = "Team B"
+# ✅ Captain selection
+@router.message(Command("captain"))
+async def choose_captain(msg: types.Message):
+    teams = load_json(TEAMS_FILE)
+    if msg.from_user.id != teams.get("referee"):
+        return await msg.answer("Only Referee can choose captain.")
+
+    if not msg.entities or len(msg.entities) < 2 or not msg.entities[1].user:
+        return await msg.answer("Usage: /captain @username A/B")
+
+    target = msg.entities[1].user.full_name
+    dest_team = msg.text.split()[-1].upper()
+    if dest_team == "A":
+        teams["captain_a"] = target
     else:
-        winner = "DRAW"
+        teams["captain_b"] = target
 
-    await msg.answer(f"🏁 Match Ended!\n\nFinal Score:\nTeam A {score_a} - {score_b} Team B\n🏆 Winner: {winner}")
+    save_json(TEAMS_FILE, teams)
+    await msg.answer(f"👑 {target} is now Captain of Team {dest_team}")
+
+# ✅ Goalkeeper set/change
+@router.message(Command("gk"))
+async def set_goalkeeper(msg: types.Message):
+    teams = load_json(TEAMS_FILE)
+    if msg.from_user.id != teams.get("referee"):
+        return await msg.answer("Only Referee can set Goalkeeper.")
+
+    parts = msg.text.split()
+    if len(parts) != 3:
+        return await msg.answer("Usage: /gk A 1")
+
+    team, num = parts[1], parts[2]
+    teams[f"gk_{team.lower()}"] = num
+    save_json(TEAMS_FILE, teams)
+    await msg.answer(f"🧤 Goalkeeper of Team {team.upper()} set to Player {num}")
+
+@router.message(Command("change_gk"))
+async def change_goalkeeper(msg: types.Message):
+    teams = load_json(TEAMS_FILE)
+    if msg.from_user.id != teams.get("referee"):
+        return await msg.answer("Only Referee can change Goalkeeper.")
+
+    parts = msg.text.split()
+    if len(parts) != 4:
+        return await msg.answer("Usage: /change_gk A 5")
+
+    team, old_num, new_num = parts[1], parts[2], parts[3]
+    teams[f"gk_{team.lower()}"] = new_num
+    save_json(TEAMS_FILE, teams)
+    await msg.answer(f"🔄 Goalkeeper changed in Team {team.upper()} from Player {old_num} to Player {new_num}")
