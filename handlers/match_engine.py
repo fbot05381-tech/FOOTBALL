@@ -1,8 +1,9 @@
 import os
 import random
 import asyncio
-from aiogram import Router
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import Router, F, types
+from aiogram.filters import Command
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from utils.db import load_json, save_json
 
 router = Router()
@@ -10,8 +11,8 @@ DATA_DIR = "database"
 TEAMS_FILE = os.path.join(DATA_DIR, "teams.json")
 MATCH_FILE = os.path.join(DATA_DIR, "matches.json")
 
-@router.message(commands=["start_match"])
-async def start_match(msg: Message):
+@router.message(Command("start_match"))
+async def start_match(msg: types.Message):
     teams = load_json(TEAMS_FILE)
     if msg.from_user.id != teams.get("referee"):
         return await msg.answer("Only Referee can start the match.")
@@ -32,7 +33,7 @@ async def start_match(msg: Message):
     await msg.answer(f"🎲 Toss complete! Team {toss_result} gets the ball first!")
     await next_turn(msg)
 
-async def next_turn(msg: Message):
+async def next_turn(msg: types.Message):
     match = load_json(MATCH_FILE)
     team = match["ball_possession"]
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -42,21 +43,15 @@ async def next_turn(msg: Message):
     ])
     await msg.answer(f"Team {team} has the ball!\nChoose your move:", reply_markup=kb)
 
-from aiogram import F
-from aiogram.types import CallbackQuery
-
 @router.callback_query(F.data == "action_kick")
 async def action_kick(cb: CallbackQuery):
     match = load_json(MATCH_FILE)
     team = match["ball_possession"]
     gk_team = "A" if team == "B" else "B"
 
-    await cb.message.answer("⚽ Attempting a GOAL!\nShooter and Goalkeeper pick a number (1-5)!")
-
     shooter_num = random.randint(1,5)
     gk_num = random.randint(1,5)
 
-    await asyncio.sleep(2)
     if shooter_num != gk_num:
         match["score"][team] += 1
         await cb.message.answer(f"🥅 GOAL for Team {team}! Score: {match['score']['A']} - {match['score']['B']}")
@@ -71,12 +66,11 @@ async def action_kick(cb: CallbackQuery):
 async def action_defensive(cb: CallbackQuery):
     match = load_json(MATCH_FILE)
     team = match["ball_possession"]
-    await cb.message.answer(f"🛡️ Team {team} is moving defensively!")
     if random.choice([True, False]):
         match["ball_possession"] = "A" if team == "B" else "B"
         await cb.message.answer("😱 Ball stolen by opposite team!")
     else:
-        await cb.message.answer("✅ Ball kept safely!")
+        await cb.message.answer(f"🛡️ Team {team} kept the ball safely!")
     save_json(MATCH_FILE, match)
     await next_turn(cb.message)
 
@@ -84,11 +78,10 @@ async def action_defensive(cb: CallbackQuery):
 async def action_pass(cb: CallbackQuery):
     match = load_json(MATCH_FILE)
     team = match["ball_possession"]
-    await cb.message.answer(f"🤝 Team {team} is passing the ball!")
     if random.choice([True, False]):
         match["ball_possession"] = "A" if team == "B" else "B"
         await cb.message.answer("🚨 Opponent intercepted the pass!")
     else:
-        await cb.message.answer("✅ Successful pass!")
+        await cb.message.answer(f"🤝 Team {team} passed successfully!")
     save_json(MATCH_FILE, match)
     await next_turn(cb.message)
