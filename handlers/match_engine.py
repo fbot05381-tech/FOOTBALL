@@ -46,10 +46,14 @@ async def next_turn(msg: types.Message):
 @router.callback_query(F.data == "action_kick")
 async def action_kick(cb: CallbackQuery):
     match = load_json(MATCH_FILE)
+    teams = load_json(TEAMS_FILE)
     team = match["ball_possession"]
     gk_team = "A" if team == "B" else "B"
 
     shooter_num = random.randint(1,5)
+
+    # ✅ Goalkeeper check
+    gk_id = teams.get(f"gk_{gk_team}")
     gk_num = random.randint(1,5)
 
     if shooter_num != gk_num:
