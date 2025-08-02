@@ -2,7 +2,7 @@ import json
 import os
 from config import PLAYERS_FILE, TEAMS_FILE, TOURNAMENTS_FILE
 
-# ✅ Load JSON file
+# ✅ Load JSON
 def load_json(path):
     if not os.path.exists(path):
         return {}
@@ -12,12 +12,12 @@ def load_json(path):
         except:
             return {}
 
-# ✅ Save JSON file
+# ✅ Save JSON
 def save_json(path, data):
     with open(path, "w") as f:
         json.dump(data, f, indent=4)
 
-# ✅ Check if user is already in any team of current chat
+# ✅ Check if user is in any team in current chat
 def is_user_in_any_team(chat_id, user_id):
     teams = load_json(TEAMS_FILE)
     chat_id = str(chat_id)
@@ -31,7 +31,15 @@ def is_user_in_any_team(chat_id, user_id):
         return True
     return False
 
-# ✅ Get player team (A/B)
+# ✅ 🔥 Global check: Is user in any group game?
+def is_user_in_any_group(user_id):
+    teams = load_json(TEAMS_FILE)
+    for chat_id, game in teams.items():
+        if user_id in game["team_A"]["players"] or user_id in game["team_B"]["players"]:
+            return True
+    return False
+
+# ✅ Get user's team (A/B)
 def get_user_team(chat_id, user_id):
     teams = load_json(TEAMS_FILE)
     chat_id = str(chat_id)
@@ -44,7 +52,7 @@ def get_user_team(chat_id, user_id):
         return "B"
     return None
 
-# ✅ Update player stats (for MVP tracking)
+# ✅ Update Player Stats
 def update_player_stat(user_id, stat_type):
     players = load_json(PLAYERS_FILE)
     user_id = str(user_id)
@@ -54,7 +62,7 @@ def update_player_stat(user_id, stat_type):
     players[user_id][stat_type] += 1
     save_json(PLAYERS_FILE, players)
 
-# ✅ Get MVP based on goals/steals/passes
+# ✅ Get MVP
 def get_mvp():
     players = load_json(PLAYERS_FILE)
     if not players:
