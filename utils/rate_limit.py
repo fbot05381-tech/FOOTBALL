@@ -1,4 +1,5 @@
 import time
+from aiogram import Bot
 
 last_command_time = {}
 score_last_used = {}
@@ -6,18 +7,24 @@ score_last_used = {}
 GLOBAL_COOLDOWN = 10
 SCORE_COOLDOWN = 30
 
-def can_use_command(user_id, command):
+COOLDOWN_GIF = "CgACAgQAAxkBAANHZCoolDownGIFID"  # अपनी gif का file_id डालना
+
+async def check_cooldown(user_id, command, bot: Bot, chat_id):
     now = time.time()
 
-    # Global 10 sec gap
+    # Global 10s gap
     if user_id in last_command_time and now - last_command_time[user_id] < GLOBAL_COOLDOWN:
-        return False, f"⏳ Please wait {int(GLOBAL_COOLDOWN - (now - last_command_time[user_id]))}s before using another command."
+        wait_time = int(GLOBAL_COOLDOWN - (now - last_command_time[user_id]))
+        await bot.send_animation(chat_id, animation=COOLDOWN_GIF, caption=f"⏳ Wait {wait_time}s before next command!")
+        return False
     last_command_time[user_id] = now
 
-    # /score 30 sec gap
+    # /score 30s gap
     if command == "score":
         if user_id in score_last_used and now - score_last_used[user_id] < SCORE_COOLDOWN:
-            return False, f"⏳ /score can be used again after {int(SCORE_COOLDOWN - (now - score_last_used[user_id]))}s."
+            wait_time = int(SCORE_COOLDOWN - (now - score_last_used[user_id]))
+            await bot.send_animation(chat_id, animation=COOLDOWN_GIF, caption=f"📊 /score cooldown active! Wait {wait_time}s")
+            return False
         score_last_used[user_id] = now
 
-    return True, None
+    return True
