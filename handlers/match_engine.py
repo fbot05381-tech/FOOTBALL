@@ -3,10 +3,10 @@ import random
 import time
 from aiogram import Router, types
 from aiogram.filters import Command
+from utils.db import read_json, write_json, MATCH_DB, PLAYER_DB
 
 router = Router()
 
-# --- Match Data ---
 match_data = {
     "team_a": [],
     "team_b": [],
@@ -25,6 +25,7 @@ score_cooldown = 0
 command_cooldowns = {}
 
 # ========== Helper Functions ==========
+
 async def update_scoreboard(message: types.Message):
     table = f"📊 <b>Match Scoreboard</b>\n\n"
     table += f"🔵 Team A: {match_data['score']['A']}\n"
@@ -51,56 +52,49 @@ def can_use_command(uid):
         return True
     return False
 
-# ========== Team Mode Start ==========
-async def start_team_mode(callback: types.CallbackQuery):
-    match_data["team_a"].clear()
-    match_data["team_b"].clear()
-    match_data["score"] = {"A": 0, "B": 0}
-    match_data["stats"].clear()
-    match_data["started"] = False
-    match_data["paused"] = False
-    match_data["referee"] = callback.from_user.id
+# ========== 2 MINUTE JOIN SYSTEM ==========
 
-    msg = await callback.message.answer(
-        "🏟 <b>Team Mode Started!</b>\n\n"
-        "Players join using:\n"
-        "/join_teamA\n"
-        "/join_teamB\n\n"
-        "⏳ <i>2 minutes to join teams!</i>"
-    )
+async def send_join_commands(message: types.Message):
+    join_msg_a = await message.answer("🔵 Team A join: /join_teamA\n⏳ Available for 2 minutes")
+    join_msg_b = await message.answer("🔴 Team B join: /join_teamB\n⏳ Available for 2 minutes")
 
-    # 2-minute auto delete join message
     await asyncio.sleep(120)
     try:
-        await msg.delete()
+        await join_msg_a.delete()
+        await join_msg_b.delete()
     except:
         pass
 
-# ========== Join Commands ==========
+# ====== Join Commands ======
+
 @router.message(Command("join_teamA"))
 async def join_team_a(message: types.Message):
-    uid = message.from_user.id
-    if uid in match_data["team_a"] or uid in match_data["team_b"]:
+    if message.from_user.id in match_data["team_a"] or message.from_user.id in match_data["team_b"]:
         return await message.answer("⚠️ Already in a team!")
-    match_data["team_a"].append(uid)
+    match_data["team_a"].append(message.from_user.id)
     await message.answer(f"✅ {message.from_user.full_name} joined Team A!")
 
 @router.message(Command("join_teamB"))
 async def join_team_b(message: types.Message):
-    uid = message.from_user.id
-    if uid in match_data["team_a"] or uid in match_data["team_b"]:
+    if message.from_user.id in match_data["team_a"] or message.from_user.id in match_data["team_b"]:
         return await message.answer("⚠️ Already in a team!")
-    match_data["team_b"].append(uid)
+    match_data["team_b"].append(message.from_user.id)
     await message.answer(f"✅ {message.from_user.full_name} joined Team B!")
 
-# ========== Match Control Commands ==========
+# ========== Match Commands ==========
+
+@router.message(Command("set_referee"))
+async def set_referee(message: types.Message):
+    match_data["referee"] = message.from_user.id
+    await message.answer(f"👨‍⚖️ Referee set: {message.from_user.full_name}")
+
 @router.message(Command("start_match"))
 async def start_match(message: types.Message):
-    if message.from_user.id != match_data["referee"]:
+    if match_data["referee"] and message.from_user.id != match_data["referee"]:
         return await message.answer("⚠️ Only referee can start the match!")
 
     if not match_data["team_a"] or not match_data["team_b"]:
-        return await message.answer("⚠️ Both teams must have players before starting!")
+        return await message.answer("⚠️ Both teams must have at least 1 player!")
 
     match_data["started"] = True
     match_data["start_time"] = time.time()
@@ -133,24 +127,14 @@ async def show_score(message: types.Message):
     score_cooldown = now
     await update_scoreboard(message)
 
-@router.message(Command("set_referee"))
-async def set_referee(message: types.Message):
-    if message.reply_to_message:
-        match_data["referee"] = message.reply_to_message.from_user.id
-        await message.answer(f"👨‍⚖️ Referee set: {message.reply_to_message.from_user.full_name}")
-    else:
-        match_data["referee"] = message.from_user.id
-        await message.answer(f"👨‍⚖️ Referee set: {message.from_user.full_name}")
-
 @router.message(Command("end_match"))
 async def end_match(message: types.Message):
     if message.from_user.id != match_data["referee"]:
         return await message.answer("⚠️ Only referee can end the match!")
 
     mvp = await auto_mvp()
-    await message.answer(f"🏁 Match Ended!\nMVP: {mvp or 'No MVP'}")
+    await message.answer(f"🏁 Match Ended!\nMVP: {mvp}")
 
-    # Reset match data
     match_data["started"] = False
     match_data["paused"] = False
     match_data["score"] = {"A": 0, "B": 0}
