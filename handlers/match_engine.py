@@ -1,6 +1,6 @@
 import random
 from aiogram import Router
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message
 from aiogram.filters import Command
 from utils.db import read_db, update_db
 
@@ -22,6 +22,7 @@ async def start_match(msg: Message):
 
     db[chat_id]["ball"] = None
     db[chat_id]["score"] = {"A": 0, "B": 0}
+    db[chat_id]["moves"] = {}  # Track moves for MVP
     update_db(chat_id, db[chat_id])
 
     await msg.answer("🏆 Match Started!\n⚽ Use /kickoff to decide who starts with the ball.")
@@ -36,10 +37,6 @@ async def kickoff(msg: Message):
         await msg.answer("❌ Teams are not ready.")
         return
 
-    if not db[chat_id]["captains"]:
-        await msg.answer("⚠️ Captains must be set with /set_captain first!")
-        return
-
     coin = random.choice(["head", "tail"])
     db[chat_id]["ball"] = "A" if coin == "head" else "B"
     update_db(chat_id, db[chat_id])
@@ -50,6 +47,7 @@ async def kickoff(msg: Message):
 @router.message(Command("action"))
 async def action(msg: Message):
     chat_id = str(msg.chat.id)
+    user = msg.from_user.mention_html()
     db = read_db()
 
     if chat_id not in db or "ball" not in db[chat_id]:
@@ -64,18 +62,24 @@ async def action(msg: Message):
     move = args[1].upper()
     ball_team = db[chat_id]["ball"]
 
+    # Track player moves
+    if user not in db[chat_id]["moves"]:
+        db[chat_id]["moves"][user] = 0
+    db[chat_id]["moves"][user] += 1
+    update_db(chat_id, db[chat_id])
+
     if move == "KICK":
-        await msg.answer(f"⚽ Team {ball_team} attempts a GOAL!\n🧤 Waiting for Goalkeeper...")
+        await msg.answer(f"⚽ {user} attempts a GOAL!\n🧤 Waiting for Goalkeeper...")
         db[chat_id]["pending_kick"] = ball_team
         update_db(chat_id, db[chat_id])
         return
 
     if move == "PASS":
-        await msg.answer(f"🔄 Team {ball_team} passed the ball to a teammate!")
+        await msg.answer(f"🔄 {user} passed the ball to a teammate!")
         return
 
     if move == "DEFENSIVE":
-        await msg.answer(f"🛡️ Team {ball_team} is playing defensive!")
+        await msg.answer(f"🛡️ {user} is playing defensive!")
         return
 
     await msg.answer("❌ Invalid move. Use KICK / PASS / DEFENSIVE.")
@@ -108,3 +112,48 @@ async def gk_save(msg: Message):
     db[chat_id].pop("pending_kick")
     update_db(chat_id, db[chat_id])
     await msg.answer(f"📊 Current Score:\n🔵 Team A: {db[chat_id]['score']['A']}\n🔴 Team B: {db[chat_id]['score']['B']}")
+
+# ✅ End Match with MVP & GIF
+@router.message(Command("end_match"))
+async def end_match(msg: Message):
+    chat_id = str(msg.chat.id)
+    db = read_db()
+
+    if chat_id not in db or "score" not in db[chat_id]:
+        await msg.answer("❌ No match data found.")
+        return
+
+    scoreA = db[chat_id]["score"]["A"]
+    scoreB = db[chat_id]["score"]["B"]
+
+    # Decide winner
+    if scoreA > scoreB:
+        winner = "🔵 Team A"
+    elif scoreB > scoreA:
+        winner = "🔴 Team B"
+    else:
+        winner = "🤝 It's a DRAW!"
+
+    # MVP (Most Moves)
+    if db[chat_id]["moves"]:
+        mvp = max(db[chat_id]["moves"], key=db[chat_id]["moves"].get)
+    else:
+        mvp = "None"
+
+    # Send Final Summary
+    summary = f"🏆 <b>FINAL MATCH SUMMARY</b>\n\n🔵 Team A: {scoreA}\n🔴 Team B: {scoreB}\n\n🥇 Winner: {winner}\n⭐ MVP: {mvp}"
+    await msg.answer(summary, parse_mode="HTML")
+
+    # Send Random GIF (manual choose later)
+    gifs = [
+        "https://media.giphy.com/media/3o6Zt481isNVuQI1l6/giphy.gif",
+        "https://media.giphy.com/media/l41lXcc1fNTnq8sUE/giphy.gif",
+        "https://media.giphy.com/media/xT0xeJpnrWC4XWblEk/giphy.gif"
+    ]
+    await msg.answer_animation(random.choice(gifs))
+
+    # Clear match data
+    db[chat_id].pop("ball", None)
+    db[chat_id].pop("score", None)
+    db[chat_id].pop("moves", None)
+    update_db(chat_id, db[chat_id])
