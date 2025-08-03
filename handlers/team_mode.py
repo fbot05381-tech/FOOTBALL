@@ -1,182 +1,189 @@
-import random, asyncio
-from aiogram import Router, types
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
-from utils.db import read_db, update_db
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+import asyncio, json, os, random
 
 router = Router()
-active_matches = {}
+DATA_FILE = "database/football_data.json"
 
-# ✅ Create Teams
+# ✅ Load/Save
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        return {"teamA": [], "teamB": [], "referee": None, "score": {"A":0,"B":0}, "round":1, "ball": None, "votes": {}}
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
+
+def save_data(data):
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+# ✅ Create Team (Referee assigns)
 @router.message(Command("create_team"))
 async def create_team(msg: Message):
-    chat_id = str(msg.chat.id)
-    db = read_db()
+    data = load_data()
+    if data["referee"] is None:
+        data["referee"] = msg.from_user.id
+        save_data(data)
+        return await msg.answer("✅ You are now the Referee! Use /add_player to add members.")
 
-    db[chat_id] = {
-        "teamA": [],
-        "teamB": [],
-        "captains": {},
-        "goalkeepers": {},
-        "referee": msg.from_user.id,
-        "current_ball": None,
-        "cards": {},
-        "round": 0
-    }
-    update_db(chat_id, db[chat_id])
-    await msg.answer(f"✅ Teams created!\n🎟️ Referee: {msg.from_user.mention_html()}\nPlayers use /join_football to join.", parse_mode="HTML")
+    await msg.answer("❌ Referee already exists!")
 
-# ✅ Join Football
-@router.message(Command("join_football"))
-async def join_football(msg: Message):
-    chat_id = str(msg.chat.id)
-    db = read_db()
-    user = msg.from_user.id
+# ✅ Add Player
+@router.message(Command("add_player"))
+async def add_player(msg: Message):
+    data = load_data()
+    if msg.from_user.id != data["referee"]:
+        return await msg.answer("❌ Only referee can add players!")
 
-    if chat_id not in db:
-        await msg.answer("❌ No active match. Use /create_team first.")
-        return
+    if msg.reply_to_message:
+        user = msg.reply_to_message.from_user
+    else:
+        parts = msg.text.split()
+        if len(parts) < 2:
+            return await msg.answer("⚠ Usage: /add_player @username (or reply)")
+        user = msg.entities[1].user if msg.entities and msg.entities[1].user else None
 
-    # 🚫 Referee cannot join game
-    if user == db[chat_id]["referee"]:
-        await msg.answer("⚠️ Referee cannot join the match!")
-        return
+    if not user:
+        return await msg.answer("❌ Invalid user!")
 
-    if user in db[chat_id]["teamA"] or user in db[chat_id]["teamB"]:
-        await msg.answer("⚠️ You already joined a team!")
-        return
+    if user.id == data["referee"]:
+        return await msg.answer("🚫 Referee cannot join the game!")
 
-    # Balance Teams
-    if len(db[chat_id]["teamA"]) <= len(db[chat_id]["teamB"]):
-        db[chat_id]["teamA"].append(user)
+    if user.username in data["teamA"] or user.username in data["teamB"]:
+        return await msg.answer("⚠ Player already added!")
+
+    # Balance check
+    if len(data["teamA"]) <= len(data["teamB"]):
+        data["teamA"].append(user.username or user.full_name)
         team = "A"
     else:
-        db[chat_id]["teamB"].append(user)
+        data["teamB"].append(user.username or user.full_name)
         team = "B"
 
-    update_db(chat_id, db[chat_id])
-    await msg.answer(f"✅ {msg.from_user.mention_html()} joined FOOTBALL TEAM {team}", parse_mode="HTML")
+    save_data(data)
+    await msg.answer(f"✅ Added **{user.full_name}** to Team {team}")
 
-# ✅ Start Round (Referee Only)
+# ✅ Remove Player A
+@router.message(Command("remove_player_A"))
+async def remove_player_a(msg: Message):
+    data = load_data()
+    if msg.from_user.id != data["referee"]:
+        return await msg.answer("❌ Only referee can remove players!")
+    parts = msg.text.split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        return await msg.answer("⚠ Usage: /remove_player_A <number>")
+    idx = int(parts[1]) - 1
+    if idx < 0 or idx >= len(data["teamA"]):
+        return await msg.answer("❌ Invalid player number in Team A")
+    player = data["teamA"].pop(idx)
+    save_data(data)
+    await msg.answer(f"🗑 Removed **{player}** from Team A")
+
+# ✅ Remove Player B
+@router.message(Command("remove_player_B"))
+async def remove_player_b(msg: Message):
+    data = load_data()
+    if msg.from_user.id != data["referee"]:
+        return await msg.answer("❌ Only referee can remove players!")
+    parts = msg.text.split()
+    if len(parts) < 2 or not parts[1].isdigit():
+        return await msg.answer("⚠ Usage: /remove_player_B <number>")
+    idx = int(parts[1]) - 1
+    if idx < 0 or idx >= len(data["teamB"]):
+        return await msg.answer("❌ Invalid player number in Team B")
+    player = data["teamB"].pop(idx)
+    save_data(data)
+    await msg.answer(f"🗑 Removed **{player}** from Team B")
+
+# ✅ Start Round (Referee only)
 @router.message(Command("start_round"))
 async def start_round(msg: Message):
-    chat_id = str(msg.chat.id)
-    db = read_db()
+    data = load_data()
+    if msg.from_user.id != data["referee"]:
+        return await msg.answer("❌ Only referee can start rounds!")
 
-    if chat_id not in db:
-        await msg.answer("❌ No active match.")
-        return
+    current_round = data["round"]
+    if current_round > 3:
+        return await msg.answer("🏆 All 3 rounds completed!")
 
-    if msg.from_user.id != db[chat_id]["referee"]:
-        await msg.answer("⚠️ Only referee can start a round!")
-        return
+    if not data["teamA"] or not data["teamB"]:
+        return await msg.answer("⚠ Both teams must have players to start!")
 
-    db[chat_id]["round"] += 1
-    update_db(chat_id, db[chat_id])
+    data["ball"] = random.choice(data["teamA"] + data["teamB"])
+    save_data(data)
+    await msg.answer(f"🔔 **Round {current_round} STARTED!**\n⚽ Ball with: @{data['ball']}")
 
-    await msg.answer(f"🚩 Round {db[chat_id]['round']} Started!\n⚽ Referee controls the match.")
+# ✅ Score Command
+@router.message(Command("score"))
+async def score(msg: Message):
+    data = load_data()
+    round_text = "FINAL ROUND" if data["round"] == 3 else f"Round {data['round']}"
+    score_text = f"""
+🏆 **SCOREBOARD**
+Team A: {data['score']['A']}
+Team B: {data['score']['B']}
+Current: {round_text}
+"""
+    await msg.answer(score_text)
 
-# ✅ KICK Command
+# ✅ Time Command
+@router.message(Command("time"))
+async def time_alert(msg: Message):
+    data = load_data()
+    if msg.from_user.id != data["referee"]:
+        return await msg.answer("❌ Only referee can send time alerts!")
+
+    alerts = [
+        ("⏰ 15 MINUTES LEFT!", "https://media.giphy.com/media/26AHONQ79FdWZhAI0/giphy.gif"),
+        ("⏰ 10 MINUTES LEFT!", "https://media.giphy.com/media/l0HlQ7LRal7hytzGM/giphy.gif"),
+        ("⏰ 5 MINUTES LEFT!", "https://media.giphy.com/media/xT0xeJpnrWC4XWblEk/giphy.gif"),
+        ("⏰ 1 MINUTE LEFT!", "https://media.giphy.com/media/3o6Zt481isNVuQI1l6/giphy.gif")
+    ]
+    for text, gif in alerts:
+        await msg.answer_animation(gif, caption=text)
+        await asyncio.sleep(3)
+
+# ✅ Kick Command (Player+GK choose number)
 @router.message(Command("kick"))
 async def kick(msg: Message):
-    chat_id = str(msg.chat.id)
-    db = read_db()
+    data = load_data()
+    if msg.from_user.username != data["ball"]:
+        return await msg.answer("⚽ You don't have the ball!")
 
-    if chat_id not in db:
-        await msg.answer("❌ No active match.")
-        return
-
-    user = msg.from_user.mention_html()
-    db_data = db[chat_id]
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=str(i), callback_data=f"kick_num:{i}:{msg.from_user.id}")]
-        for i in range(1, 6)
-    ])
-    await msg.answer(f"⚽ {user} is attempting a KICK!\nSelect your number (1-5)", parse_mode="HTML", reply_markup=keyboard)
-
-# ✅ Handle KICK Number
-@router.callback_query(lambda c: c.data.startswith("kick_num:"))
-async def handle_kick_number(callback: types.CallbackQuery):
-    _, num, player_id = callback.data.split(":")
-    num = int(num)
-    chat_id = str(callback.message.chat.id)
-    db = read_db()
-
-    gk_num = random.randint(1, 5)
-    if num == gk_num:
-        await callback.message.answer(f"🧤 GK saved the GOAL!\nPlayer ID: {player_id}")
-    else:
-        await callback.message.answer(f"🥅 GOAL Scored by Player ID: {player_id}")
+    numbers = list(range(1,6))
+    btns = InlineKeyboardBuilder()
+    for n in numbers:
+        btns.button(text=str(n), callback_data=f"kick:{n}")
+    await msg.answer("🎯 Choose your kick number (1-5)", reply_markup=btns.as_markup())
 
 # ✅ PASS Command
 @router.message(Command("pass"))
-async def pass_ball(msg: Message):
-    chat_id = str(msg.chat.id)
-    db = read_db()
+async def pass_cmd(msg: Message):
+    data = load_data()
+    current = msg.from_user.username
+    if current != data["ball"]:
+        return await msg.answer("⚽ You don't have the ball!")
 
-    if chat_id not in db:
-        await msg.answer("❌ No active match.")
-        return
+    team = "A" if current in data["teamA"] else "B"
+    players = data["teamA"] if team=="A" else data["teamB"]
+    idx = players.index(current)
+    nearby = [p for i,p in enumerate(players) if abs(i-idx)==1]
+    far = [p for i,p in enumerate(players) if abs(i-idx)>1]
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔄 LOB PASS", callback_data="pass_type:lob")],
-        [InlineKeyboardButton(text="🎯 LONG PASS", callback_data="pass_type:long")]
-    ])
-    await msg.answer("Choose PASS type:", reply_markup=keyboard)
+    btns = InlineKeyboardBuilder()
+    for p in nearby:
+        btns.button(text=f"LOB → {p}", callback_data=f"pass:lob:{p}")
+    for p in far:
+        btns.button(text=f"LONG → {p}", callback_data=f"pass:long:{p}")
+    await msg.answer("🤝 Choose pass type & player", reply_markup=btns.as_markup())
 
-# ✅ Handle PASS Type
-@router.callback_query(lambda c: c.data.startswith("pass_type:"))
-async def handle_pass_type(callback: types.CallbackQuery):
-    chat_id = str(callback.message.chat.id)
-    db = read_db()
+# ✅ End Match (RESET EVERYTHING)
+@router.message(Command("end_match"))
+async def end_match(msg: Message):
+    data = load_data()
+    if msg.from_user.id != data["referee"]:
+        return await msg.answer("❌ Only referee can end the match!")
 
-    pass_type = callback.data.split(":")[1]
-    players = db[chat_id]["teamA"] + db[chat_id]["teamB"]
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"Player {i+1}", callback_data=f"pass_player:{pid}")]
-        for i, pid in enumerate(players)
-    ])
-    await callback.message.answer(f"Select a player for {pass_type.upper()} PASS:", reply_markup=keyboard)
-
-# ✅ Handle PASS Player
-@router.callback_query(lambda c: c.data.startswith("pass_player:"))
-async def handle_pass_player(callback: types.CallbackQuery):
-    player_id = callback.data.split(":")[1]
-    await callback.message.answer(f"✅ Ball passed to Player {player_id}")
-
-# ✅ RED CARD
-@router.message(Command("red_card"))
-async def red_card(msg: Message):
-    chat_id = str(msg.chat.id)
-    db = read_db()
-    user = msg.reply_to_message.from_user.id if msg.reply_to_message else None
-
-    if not user:
-        await msg.answer("⚠️ Reply to a player's message to give a RED CARD.")
-        return
-
-    if user in db[chat_id]["teamA"]:
-        db[chat_id]["teamA"].remove(user)
-    if user in db[chat_id]["teamB"]:
-        db[chat_id]["teamB"].remove(user)
-
-    db[chat_id]["cards"][user] = "RED"
-    update_db(chat_id, db[chat_id])
-    await msg.answer(f"🟥 RED CARD!\nPlayer {msg.reply_to_message.from_user.mention_html()} removed from match!", parse_mode="HTML")
-
-# ✅ YELLOW CARD
-@router.message(Command("yellow_card"))
-async def yellow_card(msg: Message):
-    chat_id = str(msg.chat.id)
-    db = read_db()
-    user = msg.reply_to_message.from_user.id if msg.reply_to_message else None
-
-    if not user:
-        await msg.answer("⚠️ Reply to a player's message to give a YELLOW CARD.")
-        return
-
-    db[chat_id]["cards"][user] = "YELLOW"
-    update_db(chat_id, db[chat_id])
-    await msg.answer(f"🟨 YELLOW CARD to {msg.reply_to_message.from_user.mention_html()}", parse_mode="HTML")
+    save_data({"teamA": [], "teamB": [], "referee": None, "score": {"A":0,"B":0}, "round":1, "ball": None, "votes": {}})
+    await msg.answer("🛑 Match ended!\n✅ Teams, scores & referee cleared. Ready for a new game.")
