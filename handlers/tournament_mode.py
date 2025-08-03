@@ -155,3 +155,7 @@ async def points_table(msg: Message):
         text += f"{t}: {p} pts\n"
 
     await msg.answer(text)
+
+# ✅ Dummy Reminder Loop (to avoid import error)
+async def reminder_loop():
+    return
