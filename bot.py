@@ -1,40 +1,29 @@
 import asyncio
-import importlib
 import logging
 import os
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
-from aiogram.types import Message
-from aiogram.filters import CommandStart
+from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 
+from handlers import match_engine, tournament_mode
 from utils.db import init_db
 
+logging.basicConfig(level=logging.INFO)
 load_dotenv()
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
 
-# ✅ Startup पर DB initialize
+# Routers include
+dp.include_router(match_engine.router)
+dp.include_router(tournament_mode.router)
+
 async def on_startup():
+    logging.info("✅ Football Bot Started!")
     init_db()
-    logger.info("✅ Database initialized")
-
-# ✅ Routers load
-from handlers.match_engine import router as match_router
-from handlers.tournament_mode import router as tournament_router
-
-dp.include_router(match_router)
-dp.include_router(tournament_router)
-
-# ✅ Basic Ping Command
-@dp.message(CommandStart())
-async def start_cmd(msg: Message):
-    await msg.answer("⚽ Football Bot is Live!\nUse /start_football to begin!")
 
 async def main():
     await on_startup()
