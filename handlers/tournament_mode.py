@@ -6,6 +6,7 @@ from aiogram.filters import Command
 
 router = Router()
 
+# ====== Tournament Data ======
 tournament_data = {
     "teams": {},
     "referee": None,
@@ -20,7 +21,7 @@ tournament_data = {
 
 tournament_score_cooldown = 0
 
-# ========== Helper Functions ==========
+# ====== Helper Functions ======
 async def update_tournament_scoreboard(message: types.Message):
     if not tournament_data["score"]:
         return await message.answer("⚠️ No scores yet!")
@@ -39,7 +40,8 @@ async def auto_mvp_tournament():
             best = player
     return best or "No MVP"
 
-# ========== Commands ==========
+# ====== Commands ======
+
 @router.message(Command("create_tournament"))
 async def create_tournament(message: types.Message):
     tournament_data["teams"].clear()
@@ -49,33 +51,6 @@ async def create_tournament(message: types.Message):
     tournament_data["score"].clear()
     tournament_data["stats"].clear()
     await message.answer("✅ Tournament Created!\nPlayers join with /join_tournament")
-
-@router.message(Command("join_tournament"))
-async def join_tournament(message: types.Message):
-    user = message.from_user.full_name
-    uid = message.from_user.id
-
-    for members in tournament_data["teams"].values():
-        if uid in members:
-            return await message.answer("⚠️ Already in a team!")
-
-    if not tournament_data["teams"]:
-        tournament_data["teams"]["Team A"] = [uid]
-        team = "Team A"
-    else:
-        team_a = len(tournament_data["teams"].get("Team A", []))
-        team_b = len(tournament_data["teams"].get("Team B", []))
-        if team_a <= team_b:
-            tournament_data["teams"].setdefault("Team A", []).append(uid)
-            team = "Team A"
-        else:
-            tournament_data["teams"].setdefault("Team B", []).append(uid)
-            team = "Team B"
-
-    if team not in tournament_data["score"]:
-        tournament_data["score"][team] = 0
-
-    await message.answer(f"✅ {user} joined {team}!")
 
 @router.message(Command("set_referee"))
 async def set_referee(message: types.Message):
@@ -95,6 +70,36 @@ async def get_referee(message: types.Message):
     if not ref:
         return await message.answer("⚠️ No referee set yet!")
     await message.answer(f"👨‍⚖️ Current Referee ID: <code>{ref}</code>")
+
+@router.message(Command("join_tournament"))
+async def join_tournament(message: types.Message):
+    user = message.from_user.full_name
+    uid = message.from_user.id
+
+    # पहले से किसी टीम में है?
+    for members in tournament_data["teams"].values():
+        if uid in members:
+            return await message.answer("⚠️ Already in a team!")
+
+    # Auto assign to Team A or B
+    if not tournament_data["teams"]:
+        tournament_data["teams"]["Team A"] = [uid]
+        team = "Team A"
+    else:
+        team_a = len(tournament_data["teams"].get("Team A", []))
+        team_b = len(tournament_data["teams"].get("Team B", []))
+        if team_a <= team_b:
+            tournament_data["teams"].setdefault("Team A", []).append(uid)
+            team = "Team A"
+        else:
+            tournament_data["teams"].setdefault("Team B", []).append(uid)
+            team = "Team B"
+
+    # Score init
+    if team not in tournament_data["score"]:
+        tournament_data["score"][team] = 0
+
+    await message.answer(f"✅ {user} joined {team}!")
 
 @router.message(Command("start_tournament"))
 async def start_tournament(message: types.Message):
