@@ -1,12 +1,15 @@
 import json, os
 
-def load_json(path):
-    if not os.path.exists(path):
+def load_json(file):
+    if not os.path.exists(file):
         return {}
-    with open(path, "r") as f:
-        return json.load(f)
+    with open(file, "r") as f:
+        try:
+            return json.load(f)
+        except:
+            return {}
 
-def save_json(path, data):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+def save_json(file, data):
+    os.makedirs(os.path.dirname(file), exist_ok=True)
+    with open(file, "w") as f:
         json.dump(data, f, indent=2)
