@@ -92,21 +92,32 @@ async def show_score(message: types.Message):
 
 @router.message(Command("set_referee"))
 async def set_referee(message: types.Message):
-    if not message.entities or len(message.entities) < 2:
-        return await message.answer("⚠️ Use /set_referee @username")
-    match_data["referee"] = message.from_user.id
-    await message.answer(f"👨‍⚖️ Referee set: {message.from_user.full_name}")
+    if message.reply_to_message:
+        ref_id = message.reply_to_message.from_user.id
+        ref_name = message.reply_to_message.from_user.full_name
+    else:
+        ref_id = message.from_user.id
+        ref_name = message.from_user.full_name
+
+    match_data["referee"] = ref_id
+    await message.answer(f"👨‍⚖️ Referee set: {ref_name}")
+
+@router.message(Command("get_referee"))
+async def get_referee(message: types.Message):
+    if not match_data["referee"]:
+        return await message.answer("⚠️ No referee set yet!")
+    await message.answer(f"👨‍⚖️ Current Referee ID: <code>{match_data['referee']}</code>")
 
 @router.message(Command("add_player"))
 async def add_player(message: types.Message):
     if message.from_user.id != match_data["referee"]:
         return await message.answer("⚠️ Only referee can add players!")
 
-    if not message.entities or len(message.entities) < 2:
-        return await message.answer("⚠️ Tag a user or provide @username to add!")
-    
+    if not message.reply_to_message:
+        return await message.answer("⚠️ Reply to a user's message to add them!")
+
     team_choice = "A" if len(match_data["team_a"]) <= len(match_data["team_b"]) else "B"
-    user_id = message.reply_to_message.from_user.id if message.reply_to_message else message.from_user.id
+    user_id = message.reply_to_message.from_user.id
     if team_choice == "A":
         match_data["team_a"].append(user_id)
     else:
