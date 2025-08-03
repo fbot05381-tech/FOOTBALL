@@ -1,221 +1,139 @@
+import asyncio
+import json
+import time
 from aiogram import Router, F
-from aiogram.types import Message, InputSticker
-from utils.db import get_match_data, save_match_data, reset_match_data
-import random, asyncio, time
+from aiogram.types import Message
+from aiogram.filters import Command
+from utils.db import load_team_data, save_team_data
+from utils.helpers import cooldown_check, set_cooldown, format_time
 
 router = Router()
 
-# ⏱️ Rate Limit Storage
-last_command_time = {}
-last_score_time_group = {}
-
-# ✅ Default Sticker ID (Telegram Animated Trophy)
-DEFAULT_STICKER = "CAACAgIAAxkBAAEBxJxnk_TROPHY_STICKER"
-
-def check_rate_limit(user_id, chat_id, cmd, limit):
-    now = time.time()
-    if cmd == "score":
-        global last_score_time_group
-        if chat_id in last_score_time_group and now - last_score_time_group[chat_id] < limit:
-            return False
-        last_score_time_group[chat_id] = now
-        return True
-    else:
-        if user_id in last_command_time and now - last_command_time[user_id] < limit:
-            return False
-        last_command_time[user_id] = now
-        return True
-
-# ✅ Create Team
-@router.message(F.text == "/create_team")
+# ✅ TEAM MODE: Create Team
+@router.message(Command("create_team"))
 async def create_team(msg: Message):
-    if not check_rate_limit(msg.from_user.id, msg.chat.id, "create", 10):
-        await msg.answer("⏳ Please wait 10 seconds before using another command.")
-        return
+    data = load_team_data()
+    chat_id = str(msg.chat.id)
 
-    data = get_match_data()
-    data["teams"] = {"A": [], "B": []}
-    data["referee_id"] = msg.from_user.id
-    data["status"] = "waiting"
-    data["round"] = 0
-    data["start_time"] = None
-    data["score"] = {"A":0, "B":0}
-    data["player_stats"] = {}
-    save_match_data(data)
+    data[chat_id] = {
+        "referee": msg.from_user.id,
+        "team_a": [],
+        "team_b": [],
+        "score_a": 0,
+        "score_b": 0,
+        "round": 1,
+        "match_paused": False,
+        "paused_at": None,
+        "time_left": 15 * 60,
+        "start_time": None,
+        "cooldowns": {}
+    }
+    save_team_data(data)
+    await msg.answer("✅ Team mode created!\nUse /join_football to join within 2 minutes.")
 
-    await msg.answer("🎮 Match setup created!\n\nPlayers, type /join_football to join Team A or Team B.")
+# ✅ TEAM MODE: Join Football
+@router.message(Command("join_football"))
+async def join_team(msg: Message):
+    data = load_team_data()
+    chat_id = str(msg.chat.id)
 
-    async def join_alerts():
-        await asyncio.sleep(60)
-        await msg.answer("⏳ 1 Minute left! Type /join_football to join the match.")
-        await asyncio.sleep(30)
-        await msg.answer("⏳ 30 Seconds left! Last chance to join with /join_football.")
-        await asyncio.sleep(30)
-        await finalize_teams(msg)
+    if chat_id not in data:
+        return await msg.answer("❌ No active team mode. Use /create_team first.")
 
-    asyncio.create_task(join_alerts())
+    user_id = msg.from_user.id
+    if user_id in data[chat_id]["team_a"] or user_id in data[chat_id]["team_b"]:
+        return await msg.answer("⚠️ You are already in a team.")
 
-# ✅ Join Football
-@router.message(F.text == "/join_football")
-async def join_football(msg: Message):
-    if not check_rate_limit(msg.from_user.id, msg.chat.id, "join", 10):
-        await msg.answer("⏳ Please wait 10 seconds before using another command.")
-        return
-
-    data = get_match_data()
-    if data.get("status") != "waiting":
-        await msg.answer("⚠️ No active match to join.")
-        return
-
-    username = msg.from_user.full_name
-    if username in data['teams']['A'] or username in data['teams']['B']:
-        await msg.answer("✅ You already joined a team!")
-        return
-
-    if len(data['teams']['A']) <= len(data['teams']['B']):
-        data['teams']['A'].append(username)
+    if len(data[chat_id]["team_a"]) <= len(data[chat_id]["team_b"]):
+        data[chat_id]["team_a"].append(user_id)
         team = "A"
     else:
-        data['teams']['B'].append(username)
+        data[chat_id]["team_b"].append(user_id)
         team = "B"
 
-    save_match_data(data)
-    await msg.answer(f"✅ {username} joined Team {team}!")
+    save_team_data(data)
+    await msg.answer(f"✅ {msg.from_user.full_name} joined Team {team}!")
 
-# ✅ Finalize Teams
-async def finalize_teams(msg: Message):
-    data = get_match_data()
-    if not data['teams']['A'] or not data['teams']['B']:
-        await msg.answer("⚠️ Not enough players to start the match.")
-        return
-
-    if data['teams']['A']:
-        data['captain_A'] = random.choice(data['teams']['A'])
-        data['gk_A'] = random.choice(data['teams']['A'])
-    if data['teams']['B']:
-        data['captain_B'] = random.choice(data['teams']['B'])
-        data['gk_B'] = random.choice(data['teams']['B'])
-
-    save_match_data(data)
-
-    text = get_team_text(data)
-    pin_msg = await msg.answer(text, parse_mode="HTML")
-    try:
-        await msg.chat.pin_message(pin_msg.message_id)
-    except:
-        pass
-
-    await msg.answer("🏁 Referee can now start the match using /start_match.")
-
-# ✅ Helper: Team Text
-def get_team_text(data):
-    text = "✅ Teams Locked!\n\n"
-    text += "🔵 <b>Team A:</b>\n"
-    for p in data['teams']['A']:
-        tag = ""
-        if p == data.get('captain_A'): tag = " (C)"
-        if p == data.get('gk_A'): tag += " (GK)"
-        text += f"• {p}{tag}\n"
-
-    text += "\n🔴 <b>Team B:</b>\n"
-    for p in data['teams']['B']:
-        tag = ""
-        if p == data.get('captain_B'): tag = " (C)"
-        if p == data.get('gk_B'): tag += " (GK)"
-        text += f"• {p}{tag}\n"
-    return text
-
-# ✅ Show Teams
-@router.message(F.text == "/show_teams")
-async def show_teams(msg: Message):
-    if not check_rate_limit(msg.from_user.id, msg.chat.id, "show_teams", 10):
-        await msg.answer("⏳ Please wait 10 seconds before using another command.")
-        return
-
-    data = get_match_data()
-    if not data.get("teams"):
-        await msg.answer("⚠️ No teams created yet.")
-        return
-
-    text = get_team_text(data)
-    await msg.answer(text, parse_mode="HTML")
-
-# ✅ Start Match (Referee Only)
-@router.message(F.text == "/start_match")
+# ✅ TEAM MODE: Start Match
+@router.message(Command("start_match"))
 async def start_match(msg: Message):
-    if not check_rate_limit(msg.from_user.id, msg.chat.id, "start_match", 10):
-        await msg.answer("⏳ Please wait 10 seconds before using another command.")
-        return
+    data = load_team_data()
+    chat_id = str(msg.chat.id)
 
-    data = get_match_data()
-    if msg.from_user.id != data.get("referee_id"):
-        await msg.answer("⚠️ Only referee can start the match.")
-        return
+    if chat_id not in data:
+        return await msg.answer("❌ No active match.")
 
-    data["status"] = "ongoing"
-    data["round"] = 1
-    data["start_time"] = time.time()
-    save_match_data(data)
+    if msg.from_user.id != data[chat_id]["referee"]:
+        return await msg.answer("❌ Only referee can start the match.")
 
-    await msg.answer("🏆 Match Started! Round 1 begins now!")
+    data[chat_id]["start_time"] = time.time()
+    save_team_data(data)
 
-# ✅ End Match
-@router.message(F.text == "/end_match")
-async def end_match(msg: Message):
-    if not check_rate_limit(msg.from_user.id, msg.chat.id, "end_match", 10):
-        await msg.answer("⏳ Please wait 10 seconds before using another command.")
-        return
+    await msg.answer("🏆 Match started!\nUse /pause_match to pause.")
 
-    data = get_match_data()
-    if msg.from_user.id != data.get("referee_id"):
-        await msg.answer("⚠️ Only referee can end the match.")
-        return
+# ✅ TEAM MODE: Pause Match
+@router.message(Command("pause_match"))
+async def pause_match(msg: Message):
+    data = load_team_data()
+    chat_id = str(msg.chat.id)
 
-    if not data.get("teams"):
-        await msg.answer("⚠️ No active match found.")
-        return
+    if chat_id not in data:
+        return await msg.answer("❌ No active match.")
 
-    # Duration
-    duration_text = ""
-    if data.get("start_time"):
-        duration = int(time.time() - data["start_time"])
-        mins = duration // 60
-        secs = duration % 60
-        duration_text = f"\n⏱️ Match Duration: <b>{mins}m {secs}s</b>"
+    match = data[chat_id]
+    if msg.from_user.id != match["referee"]:
+        return await msg.answer("❌ Only referee can pause the match.")
 
-    text = "🏁 <b>FINAL MATCH SUMMARY</b>\n\n"
-    text += get_team_text(data)
-    text += f"\n\n🔵 Team A: {data['score']['A']}  |  🔴 Team B: {data['score']['B']}"
-    text += duration_text
+    if match["match_paused"]:
+        return await msg.answer("⚠️ Match is already paused.")
 
-    await msg.answer(text, parse_mode="HTML")
-    reset_match_data()
-    await msg.answer("✅ Match ended and all match data has been reset!")
+    elapsed = time.time() - match["start_time"]
+    match["time_left"] -= elapsed
+    match["match_paused"] = True
+    match["paused_at"] = time.time()
+    save_team_data(data)
 
-# ✅ Show Score (30s Group-wide Limit) + Sticker Combo
-@router.message(F.text == "/score")
-async def show_score(msg: Message):
-    if not check_rate_limit(msg.from_user.id, msg.chat.id, "score", 30):
-        await msg.answer("⏳ /score can only be used once every 30 seconds for the whole group.")
-        return
+    await msg.answer(f"⏸️ Match paused!\n⏱️ Time left: {format_time(match['time_left'])}")
 
-    data = get_match_data()
-    if not data.get("teams"):
-        await msg.answer("⚠️ No active match.")
-        return
+# ✅ TEAM MODE: Resume Match
+@router.message(Command("resume_match"))
+async def resume_match(msg: Message):
+    data = load_team_data()
+    chat_id = str(msg.chat.id)
 
-    text = "📊 <b>Current Scoreboard</b>\n\n"
-    text += f"🔵 Team A: <b>{data['score']['A']}</b>\n"
-    text += f"🔴 Team B: <b>{data['score']['B']}</b>\n\n"
+    if chat_id not in data:
+        return await msg.answer("❌ No active match.")
 
-    if data.get("player_stats"):
-        text += "👥 <b>Player Stats:</b>\n"
-        for player, stats in data['player_stats'].items():
-            text += f"• {player}: ⚽ {stats.get('goals',0)}  🎯 {stats.get('assists',0)}\n"
+    match = data[chat_id]
+    if msg.from_user.id != match["referee"]:
+        return await msg.answer("❌ Only referee can resume the match.")
 
-    # 🔥 Send Sticker + Scoreboard Combo
-    try:
-        await msg.answer_sticker(DEFAULT_STICKER)
-    except:
-        pass
-    await msg.answer(text, parse_mode="HTML")
+    if not match["match_paused"]:
+        return await msg.answer("⚠️ Match is not paused.")
+
+    match["match_paused"] = False
+    match["start_time"] = time.time()
+    save_team_data(data)
+
+    await msg.answer(f"▶️ Match resumed!\n⏱️ Time left: {format_time(match['time_left'])}")
+
+# ✅ TEAM MODE: Scoreboard (30 sec cooldown)
+@router.message(Command("score"))
+async def score(msg: Message):
+    if not cooldown_check(msg.chat.id, "score", 30):
+        return await msg.answer("⏳ Please wait 30s before checking score again.")
+
+    data = load_team_data()
+    chat_id = str(msg.chat.id)
+    if chat_id not in data:
+        return await msg.answer("❌ No active match.")
+
+    match = data[chat_id]
+    set_cooldown(msg.chat.id, "score")
+
+    await msg.answer(
+        f"📊 SCOREBOARD\n\n"
+        f"🏅 Team A: {match['score_a']}\n"
+        f"🏅 Team B: {match['score_b']}\n"
+        f"⏱️ Time left: {format_time(match['time_left'])}"
+    )
