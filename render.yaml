@@ -1,10 +1,9 @@
 services:
-  - type: worker
+  - type: web
     name: football-bot
     env: python
-    plan: free
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python bot.py"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
     envVars:
       - key: BOT_TOKEN
-        value: "YOUR_TELEGRAM_BOT_TOKEN"
+        value: "8237073959:AAGoZT6Th4nhLF2t_QgXmqnRMqvKQgMYS70"
