@@ -85,3 +85,4 @@ async def end_match(message: types.Message):
     match_data["team_a"].clear()
     match_data["team_b"].clear()
     await message.answer("🏁 Match Ended!")
+    
