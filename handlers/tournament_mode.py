@@ -16,12 +16,11 @@ tournament_data = {
     "stats": {},
     "captains": {},
     "goalkeepers": {},
-    "start_time": None,
-    "join_phase": False
+    "start_time": None
 }
 
 tournament_score_cooldown = 0
-join_messages = []
+join_message_ids = []  # join वाले messages delete करने के लिए
 
 # ====== Helper Functions ======
 async def update_tournament_scoreboard(message: types.Message):
@@ -42,6 +41,15 @@ async def auto_mvp_tournament():
             best = player
     return best or "No MVP"
 
+async def delete_join_messages(chat_id):
+    await asyncio.sleep(120)  # 2 minute बाद delete
+    for mid in join_message_ids:
+        try:
+            await router.bot.delete_message(chat_id, mid)
+        except:
+            pass
+    join_message_ids.clear()
+
 # ====== Commands ======
 
 @router.message(Command("create_tournament"))
@@ -52,22 +60,10 @@ async def create_tournament(message: types.Message):
     tournament_data["paused"] = False
     tournament_data["score"].clear()
     tournament_data["stats"].clear()
-    tournament_data["join_phase"] = True
 
-    msg_a = await message.answer("⏳ Players join Team A using /join_teamA (2 min)")
-    msg_b = await message.answer("⏳ Players join Team B using /join_teamB (2 min)")
-    join_messages.extend([msg_a.message_id, msg_b.message_id])
-
-    # 2 min join window
-    await asyncio.sleep(120)
-    tournament_data["join_phase"] = False
-    try:
-        await message.bot.delete_message(message.chat.id, msg_a.message_id)
-        await message.bot.delete_message(message.chat.id, msg_b.message_id)
-    except:
-        pass
-
-    await message.answer("✅ Join time ended! Referee can balance teams and start the tournament with /start_tournament")
+    m1 = await message.answer("✅ Tournament Created!\nUse /join_teamA to join Team A\nUse /join_teamB to join Team B\n⏳ You have 2 minutes to join!")
+    join_message_ids.append(m1.message_id)
+    asyncio.create_task(delete_join_messages(message.chat.id))
 
 @router.message(Command("set_referee"))
 async def set_referee(message: types.Message):
@@ -90,37 +86,36 @@ async def get_referee(message: types.Message):
 
 @router.message(Command("join_teamA"))
 async def join_team_a(message: types.Message):
-    if not tournament_data["join_phase"]:
-        return await message.answer("⚠️ Joining is closed!")
+    user = message.from_user.full_name
     uid = message.from_user.id
-    for members in tournament_data["teams"].values():
-        if uid in members:
-            return await message.answer("⚠️ Already in a team!")
+
+    if any(uid in members for members in tournament_data["teams"].values()):
+        return await message.answer("⚠️ Already in a team!")
+
     tournament_data["teams"].setdefault("Team A", []).append(uid)
     if "Team A" not in tournament_data["score"]:
         tournament_data["score"]["Team A"] = 0
-    await message.answer(f"✅ {message.from_user.full_name} joined Team A!")
+
+    await message.answer(f"✅ {user} joined Team A!")
 
 @router.message(Command("join_teamB"))
 async def join_team_b(message: types.Message):
-    if not tournament_data["join_phase"]:
-        return await message.answer("⚠️ Joining is closed!")
+    user = message.from_user.full_name
     uid = message.from_user.id
-    for members in tournament_data["teams"].values():
-        if uid in members:
-            return await message.answer("⚠️ Already in a team!")
+
+    if any(uid in members for members in tournament_data["teams"].values()):
+        return await message.answer("⚠️ Already in a team!")
+
     tournament_data["teams"].setdefault("Team B", []).append(uid)
     if "Team B" not in tournament_data["score"]:
         tournament_data["score"]["Team B"] = 0
-    await message.answer(f"✅ {message.from_user.full_name} joined Team B!")
+
+    await message.answer(f"✅ {user} joined Team B!")
 
 @router.message(Command("start_tournament"))
 async def start_tournament(message: types.Message):
     if message.from_user.id != tournament_data["referee"]:
         return await message.answer("⚠️ Only referee can start the tournament!")
-
-    if not tournament_data["teams"].get("Team A") or not tournament_data["teams"].get("Team B"):
-        return await message.answer("⚠️ Both teams must have players!")
 
     tournament_data["started"] = True
     tournament_data["start_time"] = time.time()
@@ -132,7 +127,8 @@ async def pause_tournament(message: types.Message):
         return await message.answer("⚠️ Only referee can pause!")
 
     tournament_data["paused"] = True
-    await message.answer("⏸️ Tournament Paused!")
+    await message.answer("⏸️ Tournament Paused! (Pinned)")
+    await message.pin()
 
 @router.message(Command("resume_tournament"))
 async def resume_tournament(message: types.Message):
@@ -163,4 +159,3 @@ async def end_tournament(message: types.Message):
     tournament_data["score"].clear()
     tournament_data["paused"] = False
     tournament_data["started"] = False
-    tournament_data["join_phase"] = False
