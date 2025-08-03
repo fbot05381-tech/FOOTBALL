@@ -1,25 +1,43 @@
-import json
-import os
+import json, os
 
-TEAM_FILE = "database/team_data.json"
-TOURNAMENT_FILE = "database/tournament_data.json"
+DB_FILE = "database.json"
 
-def load_team_data():
-    if not os.path.exists(TEAM_FILE):
-        return {}
-    with open(TEAM_FILE, "r") as f:
+def init_db():
+    if not os.path.exists(DB_FILE):
+        with open(DB_FILE, "w") as f:
+            json.dump({"matches": {}, "players": {}}, f)
+
+def load_db():
+    init_db()
+    with open(DB_FILE, "r") as f:
         return json.load(f)
 
-def save_team_data(data):
-    with open(TEAM_FILE, "w") as f:
+def save_db(data):
+    with open(DB_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
-def load_tournament_data():
-    if not os.path.exists(TOURNAMENT_FILE):
-        return {}
-    with open(TOURNAMENT_FILE, "r") as f:
-        return json.load(f)
+# --- Player Stats ---
+def add_goal(player):
+    db = load_db()
+    if player not in db["players"]:
+        db["players"][player] = {"goals": 0, "assists": 0, "matches": 0}
+    db["players"][player]["goals"] += 1
+    save_db(db)
 
-def save_tournament_data(data):
-    with open(TOURNAMENT_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+def add_assist(player):
+    db = load_db()
+    if player not in db["players"]:
+        db["players"][player] = {"goals": 0, "assists": 0, "matches": 0}
+    db["players"][player]["assists"] += 1
+    save_db(db)
+
+def add_match(player):
+    db = load_db()
+    if player not in db["players"]:
+        db["players"][player] = {"goals": 0, "assists": 0, "matches": 0}
+    db["players"][player]["matches"] += 1
+    save_db(db)
+
+def get_player_stats(player):
+    db = load_db()
+    return db["players"].get(player, {"goals": 0, "assists": 0, "matches": 0})
