@@ -26,7 +26,7 @@ async def team_mode_entry(cb: CallbackQuery):
     }
     save_json(DB_FILE, data)
 
-    await cb.message.answer("Team Mode Started!\nUse /create_team to allow players to join.")
+    await cb.message.answer("🏟️ Team Mode Started!\nUse /create_team to allow players to join.")
 
 # ✅ Referee select
 @router.callback_query(F.data == "be_referee")
@@ -60,7 +60,7 @@ async def create_team(msg: Message):
     data[chat_id]["join_start"] = time.time()
     save_json(DB_FILE, data)
 
-    await msg.answer("⏳ 2 minutes to join teams!\nUse /join_football to join Team A or Team B.")
+    await msg.answer("⏳ 2 minutes to join teams!\nPlayers, use /join_football to join Team A or Team B.")
 
     # Alerts at 30s & 15s
     await asyncio.sleep(90)
@@ -100,7 +100,7 @@ async def join_football(msg: Message):
 
     save_json(DB_FILE, data)
 
-# ✅ Finalize Teams
+# ✅ Finalize Teams & Pin
 async def finalize_teams(chat_id, msg_obj):
     data = load_json(DB_FILE)
     chat_id = str(chat_id)
@@ -112,7 +112,7 @@ async def finalize_teams(chat_id, msg_obj):
     teamB = data[chat_id]["teamB"]
 
     if len(teamA) != len(teamB) or len(teamA) == 0:
-        await msg_obj.answer("⚠️ Teams not balanced or empty! Restart with /create_team.")
+        await msg_obj.answer("⚠️ Teams not balanced or empty! Referee can restart with /create_team.")
         return
 
     # Auto-assign first players as captains
