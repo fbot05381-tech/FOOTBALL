@@ -1,37 +1,38 @@
 import json
 import os
+import asyncio
 
-# ✅ Database file paths
-DB_FOLDER = "database"
-MATCH_DB = os.path.join(DB_FOLDER, "match_data.json")
-PLAYER_DB = os.path.join(DB_FOLDER, "player_data.json")
-TOURNAMENT_DB = os.path.join(DB_FOLDER, "tournament_data.json")
+DB_DIR = "database"
+PLAYER_DB = os.path.join(DB_DIR, "players.json")
+MATCH_DB = os.path.join(DB_DIR, "match.json")
+TOURNAMENT_DB = os.path.join(DB_DIR, "tournament.json")
 
 # ✅ Ensure DB folder exists
-def ensure_db():
-    if not os.path.exists(DB_FOLDER):
-        os.makedirs(DB_FOLDER)
-    for file in [MATCH_DB, PLAYER_DB, TOURNAMENT_DB]:
-        if not os.path.exists(file):
-            with open(file, "w") as f:
-                json.dump({}, f)
+os.makedirs(DB_DIR, exist_ok=True)
 
-# ✅ Initialize DB (called on startup)
-def init_db():
-    ensure_db()
-    print("📂 Database initialized.")
-
-# ✅ Read JSON safely
-async def read_json(file_path):
-    ensure_db()
-    try:
-        with open(file_path, "r") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
+# ✅ Safe read/write
+def read_json(path):
+    if not os.path.exists(path):
         return {}
+    with open(path, "r", encoding="utf-8") as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return {}
 
-# ✅ Write JSON safely
-async def write_json(file_path, data):
-    ensure_db()
-    with open(file_path, "w") as f:
-        json.dump(data, f, indent=2)
+def write_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
+
+# ✅ Async-safe init_db
+async def init_db():
+    loop = asyncio.get_event_loop()
+    def _init():
+        if not os.path.exists(PLAYER_DB):
+            write_json(PLAYER_DB, {})
+        if not os.path.exists(MATCH_DB):
+            write_json(MATCH_DB, {})
+        if not os.path.exists(TOURNAMENT_DB):
+            write_json(TOURNAMENT_DB, {})
+    await loop.run_in_executor(None, _init)
+    return True
