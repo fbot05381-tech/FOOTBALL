@@ -1,26 +1,44 @@
-import json, os, asyncio, logging
+import json
+import os
+import asyncio
+import logging
 
+logger = logging.getLogger(__name__)
+
+# ✅ JSON file paths
 DATA_DIR = "data"
 MATCH_DB = os.path.join(DATA_DIR, "match.json")
 PLAYER_DB = os.path.join(DATA_DIR, "players.json")
 TOURNAMENT_DB = os.path.join(DATA_DIR, "tournament.json")
 
-def ensure_data_files():
-    os.makedirs(DATA_DIR, exist_ok=True)
-    for file in [MATCH_DB, PLAYER_DB, TOURNAMENT_DB]:
-        if not os.path.exists(file):
-            with open(file, "w") as f:
-                json.dump({}, f)
-
+# ✅ Safe read
 def read_json(path):
-    with open(path, "r") as f:
-        return json.load(f)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"❌ Error reading {path}: {e}")
+        return {}
 
+# ✅ Safe write
 def write_json(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+    os.makedirs(DATA_DIR, exist_ok=True)
+    try:
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        logger.error(f"❌ Error writing {path}: {e}")
 
+# ✅ Async init
 async def init_db():
-    ensure_data_files()
-    logging.info("✅ Database initialized.")
-    await asyncio.sleep(0)
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    # Create default files if not exist
+    for path in [MATCH_DB, PLAYER_DB, TOURNAMENT_DB]:
+        if not os.path.exists(path):
+            write_json(path, {})
+
+    await asyncio.sleep(0)  # Make it awaitable
+    logger.info("✅ Database initialized.")
