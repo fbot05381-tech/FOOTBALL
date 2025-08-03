@@ -1,40 +1,26 @@
 import asyncio
 import logging
 from aiogram import Bot
+from utils.db import read_json, MATCH_DB
 
-REMINDER_INTERVAL = 900  # 15 minutes (900 sec)
+logger = logging.getLogger(__name__)
 
-reminder_task = None
-match_active = False
-match_paused = False
-chat_id_global = None
+async def reminder_loop(bot: Bot):
+    logger.info("🔄 Reminder loop started...")
+    while True:
+        try:
+            await asyncio.sleep(900)  # ✅ हर 15 मिनट पर check
 
-async def reminder_loop(bot: Bot, chat_id: int, get_scoreboard):
-    global match_active, chat_id_global
-    chat_id_global = chat_id
-    match_active = True
-    logging.info("✅ Reminder loop started...")
+            match_data = read_json(MATCH_DB)
+            if match_data.get("paused"):
+                chat_id = match_data.get("chat_id")
+                if chat_id:
+                    await bot.send_message(chat_id, "⏸️ Match अभी PAUSED है! Referee resume करे।")
+            else:
+                chat_id = match_data.get("chat_id")
+                if chat_id:
+                    await bot.send_message(chat_id, "⚽ Friendly Reminder: Match चल रहा है, moves करो!")
 
-    while match_active:
-        await asyncio.sleep(REMINDER_INTERVAL)
-        if match_active and not match_paused:
-            try:
-                scoreboard_text, gif_id = get_scoreboard()
-                await bot.send_animation(chat_id, animation=gif_id, caption=f"⏰ 15 min update:\n\n{scoreboard_text}")
-            except Exception as e:
-                logging.error(f"⚠️ Reminder send failed: {e}")
-
-def stop_reminder():
-    global match_active
-    match_active = False
-    logging.info("🛑 Reminder loop stopped.")
-
-def pause_reminder():
-    global match_paused
-    match_paused = True
-    logging.info("⏸️ Reminder paused.")
-
-def resume_reminder():
-    global match_paused
-    match_paused = False
-    logging.info("▶️ Reminder resumed.")
+        except Exception as e:
+            logger.error(f"⚠️ Reminder loop error: {e}")
+            await asyncio.sleep(10)
