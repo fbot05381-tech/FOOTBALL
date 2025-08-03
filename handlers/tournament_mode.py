@@ -1,7 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
-import random, time
+import random
 from utils.db import load_json, save_json
 
 router = Router()
@@ -155,6 +155,24 @@ async def points_table(msg: Message):
         text += f"{t}: {p} pts\n"
 
     await msg.answer(text)
+
+# ✅ End Tournament
+@router.message(Command("end_tournament"))
+async def end_tournament(msg: Message):
+    data = load_json(DB_FILE)
+    chat_id = str(msg.chat.id)
+    user = msg.from_user.username or msg.from_user.first_name
+
+    if chat_id not in data or data[chat_id]["owner"] != user:
+        await msg.answer("❌ Only owner can end tournament!")
+        return
+
+    if chat_id in data:
+        del data[chat_id]
+        save_json(DB_FILE, data)
+        await msg.answer("🛑 Tournament Ended & Data Cleared!")
+    else:
+        await msg.answer("❌ No active tournament found!")
 
 # ✅ Dummy Reminder Loop (with bot arg to avoid error)
 async def reminder_loop(bot=None):
