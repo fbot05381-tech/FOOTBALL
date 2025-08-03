@@ -1,189 +1,157 @@
-import os, random, asyncio, datetime
-from aiogram import Router, types, F
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
+import random, time
 from utils.db import load_json, save_json
 
 router = Router()
-DATA_DIR = "database"
-TOURNAMENT_FILE = os.path.join(DATA_DIR, "tournament.json")
+DB_FILE = "database/tournament.json"
 
-def init_tournament():
-    return {
-        "owner": None,
-        "total_teams": 0,
-        "players_per_team": 0,
-        "registered_teams": {},
-        "matches": [],
-        "points_table": {},
-        "tournament_started": False
-    }
-
-# ✅ Background Task for Reminders
-async def reminder_loop(bot):
-    while True:
-        await asyncio.sleep(60)
-        data = load_json(TOURNAMENT_FILE)
-        if not data.get("matches"):
-            continue
-
-        now = datetime.datetime.now().strftime("%H:%M")
-        for m in data["matches"]:
-            if m.get("time") and not m.get("reminded"):
-                match_time = m["time"]
-                hour, minute = map(int, match_time.split(":"))
-                dt_match = datetime.datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
-                diff = (dt_match - datetime.datetime.now()).total_seconds() / 60
-
-                if 4 <= diff <= 6:  # 5 min before
-                    t1_captain = data["registered_teams"][m["team1"]]["captain"]
-                    t2_captain = data["registered_teams"][m["team2"]]["captain"]
-
-                    text = f"⏰ <b>Match Reminder</b>\n\n⚽ {m['team1']} vs {m['team2']} starting in 5 minutes!\n\n👑 Captains: @{t1_captain['name']} vs @{t2_captain['name']}"
-                    await bot.send_message(m["chat_id"], text, parse_mode="HTML")
-                    m["reminded"] = True
-                    save_json(TOURNAMENT_FILE, data)
-
+# ✅ Tournament Mode Entry
 @router.callback_query(F.data == "tournament_mode")
-async def tournament_mode(cb: types.CallbackQuery):
-    save_json(TOURNAMENT_FILE, init_tournament())
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="👑 I'm the Owner", callback_data="be_owner")]
-    ])
-    await cb.message.answer("🏆 Tournament Mode selected!\nChoose an Owner to organize tournament:", reply_markup=kb)
+async def tournament_mode_entry(cb: CallbackQuery):
+    data = load_json(DB_FILE)
+    chat_id = str(cb.message.chat.id)
 
-@router.callback_query(F.data == "be_owner")
-async def be_owner(cb: types.CallbackQuery):
-    data = load_json(TOURNAMENT_FILE)
-    if data.get("owner"):
-        return await cb.answer("Owner already selected!", show_alert=True)
-    data["owner"] = cb.from_user.id
-    save_json(TOURNAMENT_FILE, data)
-    await cb.message.edit_text(f"👑 {cb.from_user.full_name} is now Tournament Owner!\nUse /create_tournament")
+    data[chat_id] = {
+        "owner": cb.from_user.username or cb.from_user.first_name,
+        "total_teams": 0,
+        "team_members": [4, 10],
+        "teams": {},
+        "fixtures": [],
+        "points": {},
+        "active": False
+    }
+    save_json(DB_FILE, data)
 
+    await cb.message.answer("🏆 Tournament Mode Started!\nUse /create_tournament to begin.")
+
+# ✅ Create Tournament (Owner Only)
 @router.message(Command("create_tournament"))
-async def create_tournament(msg: types.Message):
-    data = load_json(TOURNAMENT_FILE)
-    if msg.from_user.id != data.get("owner"):
-        return await msg.answer("Only the Owner can create tournament.")
+async def create_tournament(msg: Message):
+    data = load_json(DB_FILE)
+    chat_id = str(msg.chat.id)
+    user = msg.from_user.username or msg.from_user.first_name
 
-    await msg.answer("✅ Tournament created!\nNow set total teams using /total_team 4-10")
+    if chat_id not in data or data[chat_id]["owner"] != user:
+        await msg.answer("❌ Only owner can create tournament!")
+        return
 
+    data[chat_id]["active"] = True
+    save_json(DB_FILE, data)
+    await msg.answer("✅ Tournament Created!\nNow set total teams using /total_team X")
+
+# ✅ Set Total Teams
 @router.message(Command("total_team"))
-async def total_team(msg: types.Message):
-    data = load_json(TOURNAMENT_FILE)
-    if msg.from_user.id != data.get("owner"):
-        return await msg.answer("Only Owner can set total teams.")
+async def total_team(msg: Message):
+    args = msg.text.split()
+    if len(args) < 2 or not args[1].isdigit():
+        await msg.answer("Usage: /total_team 4-10")
+        return
 
-    parts = msg.text.split()
-    if len(parts) != 2 or not parts[1].isdigit():
-        return await msg.answer("Usage: /total_team 4")
-    count = int(parts[1])
-    if count < 4 or count > 10:
-        return await msg.answer("Teams must be between 4-10.")
+    data = load_json(DB_FILE)
+    chat_id = str(msg.chat.id)
+    total = int(args[1])
+    data[chat_id]["total_teams"] = total
+    save_json(DB_FILE, data)
 
-    data["total_teams"] = count
-    save_json(TOURNAMENT_FILE, data)
-    await msg.answer(f"📌 Tournament set for {count} teams.\nNow set players per team using /team_members 4-10")
+    await msg.answer(f"✅ Tournament will have {total} teams.\nNow set members using /team_members min-max")
 
+# ✅ Set Team Members
 @router.message(Command("team_members"))
-async def team_members(msg: types.Message):
-    data = load_json(TOURNAMENT_FILE)
-    if msg.from_user.id != data.get("owner"):
-        return await msg.answer("Only Owner can set team members.")
+async def team_members(msg: Message):
+    args = msg.text.split()
+    if len(args) < 3:
+        await msg.answer("Usage: /team_members 4 10")
+        return
 
-    parts = msg.text.split()
-    if len(parts) != 2 or not parts[1].isdigit():
-        return await msg.answer("Usage: /team_members 5")
-    count = int(parts[1])
-    if count < 4 or count > 10:
-        return await msg.answer("Players per team must be 4-10.")
+    data = load_json(DB_FILE)
+    chat_id = str(msg.chat.id)
+    min_m, max_m = int(args[1]), int(args[2])
+    data[chat_id]["team_members"] = [min_m, max_m]
+    save_json(DB_FILE, data)
 
-    data["players_per_team"] = count
-    save_json(TOURNAMENT_FILE, data)
-    await msg.answer(f"👥 Players per team set to {count}\nNow teams can register using /register_team")
+    await msg.answer(f"✅ Teams can have {min_m}-{max_m} players.\nOwner can now add teams with /add_team <TeamName> @Captain")
 
-@router.message(Command("register_team"))
-async def register_team(msg: types.Message):
-    data = load_json(TOURNAMENT_FILE)
-    if data["tournament_started"]:
-        return await msg.answer("Tournament already started!")
+# ✅ Add Team
+@router.message(Command("add_team"))
+async def add_team(msg: Message):
+    args = msg.text.split()
+    if len(args) < 3:
+        await msg.answer("Usage: /add_team TeamName @Captain")
+        return
 
-    parts = msg.text.split(maxsplit=2)
-    if len(parts) < 3:
-        return await msg.answer("Usage: /register_team TeamName @Captain")
+    data = load_json(DB_FILE)
+    chat_id = str(msg.chat.id)
+    team_name = args[1]
+    captain = args[2].replace("@", "")
 
-    team_name = parts[1]
-    if team_name in data["registered_teams"]:
-        return await msg.answer("Team name already registered!")
-
-    if not msg.entities or len(msg.entities) < 2 or not msg.entities[1].user:
-        return await msg.answer("You must tag the captain.")
-
-    captain_id = msg.entities[1].user.id
-    captain_name = msg.entities[1].user.full_name
-
-    data["registered_teams"][team_name] = {
-        "captain": {"id": captain_id, "name": captain_name},
+    data[chat_id]["teams"][team_name] = {
+        "captain": captain,
         "players": []
     }
-    data["points_table"][team_name] = {"played": 0, "win": 0, "loss": 0, "points": 0}
+    data[chat_id]["points"][team_name] = 0
+    save_json(DB_FILE, data)
 
-    save_json(TOURNAMENT_FILE, data)
-    await msg.answer(f"✅ Team '{team_name}' registered with Captain {captain_name}")
+    await msg.answer(f"✅ Team <b>{team_name}</b> added with Captain @{captain}")
 
-@router.message(Command("start_tournament"))
-async def start_tournament(msg: types.Message):
-    data = load_json(TOURNAMENT_FILE)
-    if msg.from_user.id != data.get("owner"):
-        return await msg.answer("Only Owner can start tournament.")
-    if data["tournament_started"]:
-        return await msg.answer("Tournament already started!")
+# ✅ Generate Fixtures
+@router.message(Command("generate_fixtures"))
+async def generate_fixtures(msg: Message):
+    data = load_json(DB_FILE)
+    chat_id = str(msg.chat.id)
+    teams = list(data[chat_id]["teams"].keys())
 
-    if len(data["registered_teams"]) != data["total_teams"]:
-        return await msg.answer("⚠️ All teams must be registered before starting.")
+    if len(teams) < 2:
+        await msg.answer("❌ Not enough teams to generate fixtures!")
+        return
 
-    teams = list(data["registered_teams"].keys())
-    matches = []
+    fixtures = []
     for i in range(len(teams)):
         for j in range(i+1, len(teams)):
-            matches.append({"team1": teams[i], "team2": teams[j], "played": False, "chat_id": msg.chat.id})
+            fixtures.append((teams[i], teams[j]))
 
-    random.shuffle(matches)
-    data["matches"] = matches
-    data["tournament_started"] = True
-    save_json(TOURNAMENT_FILE, data)
+    random.shuffle(fixtures)
+    data[chat_id]["fixtures"] = fixtures
+    save_json(DB_FILE, data)
 
-    match_list = "\n".join([f"⚽ {m['team1']} vs {m['team2']}" for m in matches])
-    await msg.answer(f"🏆 Tournament Started!\n\n📅 Match Schedule:\n{match_list}")
+    text = "📅 <b>Fixtures</b>\n"
+    for idx, match in enumerate(fixtures, start=1):
+        text += f"{idx}. {match[0]} 🆚 {match[1]}\n"
 
-@router.message(Command("set_match_time"))
-async def set_match_time(msg: types.Message):
-    data = load_json(TOURNAMENT_FILE)
-    if msg.from_user.id != data.get("owner"):
-        return await msg.answer("Only Owner can set match times.")
+    await msg.answer(text)
 
-    parts = msg.text.split()
-    if len(parts) != 4:
-        return await msg.answer("Usage: /set_match_time TeamA TeamB 18:30")
+# ✅ Update Points
+@router.message(Command("update_points"))
+async def update_points(msg: Message):
+    args = msg.text.split()
+    if len(args) < 3:
+        await msg.answer("Usage: /update_points TeamName Points")
+        return
 
-    team1, team2, time_str = parts[1], parts[2], parts[3]
-    for m in data["matches"]:
-        if {m["team1"], m["team2"]} == {team1, team2}:
-            m["time"] = time_str
-            m["reminded"] = False
-            save_json(TOURNAMENT_FILE, data)
-            return await msg.answer(f"⏰ Match time set: {team1} vs {team2} at {time_str}")
+    data = load_json(DB_FILE)
+    chat_id = str(msg.chat.id)
+    team_name = args[1]
+    pts = int(args[2])
 
-    await msg.answer("Match not found!")
+    if team_name not in data[chat_id]["points"]:
+        await msg.answer("❌ Team not found!")
+        return
 
+    data[chat_id]["points"][team_name] += pts
+    save_json(DB_FILE, data)
+
+    await msg.answer(f"✅ {team_name} now has {data[chat_id]['points'][team_name]} points")
+
+# ✅ Points Table
 @router.message(Command("points_table"))
-async def points_table(msg: types.Message):
-    data = load_json(TOURNAMENT_FILE)
-    if not data.get("points_table"):
-        return await msg.answer("No tournament data available.")
+async def points_table(msg: Message):
+    data = load_json(DB_FILE)
+    chat_id = str(msg.chat.id)
 
-    table = "🏆 <b>Points Table</b>\n\n"
-    for team, stats in sorted(data["points_table"].items(), key=lambda x: x[1]["points"], reverse=True):
-        table += f"{team} - {stats['points']} pts (W:{stats['win']} L:{stats['loss']} P:{stats['played']})\n"
+    points = sorted(data[chat_id]["points"].items(), key=lambda x: x[1], reverse=True)
+    text = "🏆 <b>Points Table</b>\n"
+    for t, p in points:
+        text += f"{t}: {p} pts\n"
 
-    await msg.answer(table, parse_mode="HTML")
+    await msg.answer(text)
