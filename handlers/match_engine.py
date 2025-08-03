@@ -1,15 +1,17 @@
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from utils.db import get_match_data, save_match_data, reset_match_data
-from utils.db import get_scoreboard_text, add_goal, add_assist, set_last_pass
-from utils.db import pause_match, resume_match, is_paused
+from utils.db import (
+    get_match_data, save_match_data, reset_match_data,
+    get_scoreboard_text, add_goal, add_assist, set_last_pass,
+    pause_match, resume_match, is_paused
+)
 import random
 import asyncio
 
 router = Router()
 
-# 🔥 Sample GIF lists (replace with your own links)
+# 🔥 Sample GIFs
 SCOREBOARD_GIFS = [
     "https://media.giphy.com/media/3o6ZsX2Q3iAFY1n9sM/giphy.gif",
     "https://media.giphy.com/media/l0MYI7xv8sax7Qk52/giphy.gif"
@@ -67,3 +69,9 @@ async def cmd_resume(msg: Message):
     resume_match()
     await msg.answer("▶️ <b>Game Resumed!</b>", parse_mode="HTML")
     await send_scoreboard(msg)
+
+# ✅ Reset Match (Clean Everything)
+@router.message(F.text == "/reset_match")
+async def cmd_reset(msg: Message):
+    reset_match_data()
+    await msg.answer("🔄 <b>Match has been fully reset!</b>\nAll teams, scores & timers are cleared.", parse_mode="HTML")
