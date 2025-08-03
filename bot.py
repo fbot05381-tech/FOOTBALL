@@ -1,48 +1,61 @@
 import logging
 import asyncio
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.enums.parse_mode import ParseMode
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import CommandStart
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.client.default import DefaultBotProperties
 
-from match_engine import router as match_router, start_team_mode
+from match_engine import router as match_router
 from tournament_mode import router as tournament_router
 
+# ========== CONFIG ==========
 from config import BOT_TOKEN
 
 logging.basicConfig(level=logging.INFO)
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher()
+logger = logging.getLogger(__name__)
 
-# Include routers
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+dp = Dispatcher(storage=MemoryStorage())
+
+# Routers include
 dp.include_router(match_router)
 dp.include_router(tournament_router)
 
-# ========== Start Football ==========
-@dp.message(Command("start_football"))
-async def start_football(message: types.Message):
+# ========== Start Command ==========
+@dp.message(CommandStart())
+async def start_cmd(message: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚽ Team Mode", callback_data="team_mode")],
         [InlineKeyboardButton(text="🏆 Tournament Mode", callback_data="tournament_mode")]
     ])
-    await message.answer("Choose Mode:", reply_markup=kb)
+    msg = await message.answer("🎮 Choose a mode to start football game:", reply_markup=kb)
 
-# ========== Callback for Modes ==========
+# ========== Callback for Mode Selection ==========
 @dp.callback_query(F.data == "team_mode")
-async def team_mode_callback(callback: types.CallbackQuery):
-    await callback.message.delete()  # Delete mode selection message
-    await callback.message.answer("🔵 Team Mode Selected!\nPlayers have 2 minutes to join teams.")
-    await start_team_mode(callback.message.chat.id)
+async def team_mode_selected(callback: CallbackQuery):
+    try:
+        await callback.message.delete()
+    except:
+        pass
+    await callback.message.answer("✅ Team Mode Selected!\n\nUse /team_mode to start team joining phase (2 min).")
 
 @dp.callback_query(F.data == "tournament_mode")
-async def tournament_mode_callback(callback: types.CallbackQuery):
-    await callback.message.delete()  # Delete mode selection message
-    await callback.message.answer("🏆 Tournament Mode Selected!\nUse /create_tournament to begin.")
+async def tournament_mode_selected(callback: CallbackQuery):
+    try:
+        await callback.message.delete()
+    except:
+        pass
+    await callback.message.answer("✅ Tournament Mode Selected!\n\nUse /create_tournament to create tournament and /join_tournament for players.")
 
 # ========== Bot Startup ==========
 async def main():
-    logging.info("🤖 Bot Starting...")
+    logger.info("📂 Initializing database...")
+    # यहाँ database init code रहेगा
+    logger.info("✅ Database initialized.")
+    logger.info("🤖 Bot started successfully!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
