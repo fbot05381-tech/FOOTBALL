@@ -1,142 +1,174 @@
-import os, asyncio, time
-from aiogram import Router, types, F
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery
+import time, asyncio
 from utils.db import load_json, save_json
 
 router = Router()
-DATA_DIR = "database"
-TEAMS_FILE = os.path.join(DATA_DIR, "teams.json")
+DB_FILE = "database/team_mode.json"
 
-JOIN_LIMIT = 120  # 2 minutes join limit
+join_window = {}
 
-@router.message(Command("start_football"))
-async def start_football(msg: types.Message):
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="⚽ Team Mode", callback_data="team_mode")],
-        [types.InlineKeyboardButton(text="🏆 Tournament Mode", callback_data="tournament_mode")]
-    ])
-    await msg.answer("Choose Football Mode:", reply_markup=kb)
-
-# ✅ Team Mode
+# ✅ Start Team Mode
 @router.callback_query(F.data == "team_mode")
-async def team_mode(cb: CallbackQuery):
-    teams = {
-        "team_a": [],
-        "team_b": [],
+async def team_mode_entry(cb: CallbackQuery):
+    data = load_json(DB_FILE)
+    chat_id = str(cb.message.chat.id)
+
+    data[chat_id] = {
         "referee": None,
-        "game_started": False,
-        "join_open": False,
-        "join_start_time": 0
+        "teamA": [],
+        "teamB": [],
+        "captains": {},
+        "goalkeepers": {},
+        "match_started": False,
+        "join_start": None
     }
-    save_json(TEAMS_FILE, teams)
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="🎩 I'm the Referee", callback_data="be_referee")]
-    ])
-    await cb.message.answer("🎮 Team Mode selected!\nChoose a Referee:", reply_markup=kb)
+    save_json(DB_FILE, data)
 
-# ✅ Referee Select
+    await cb.message.answer("Team Mode Started!\nUse /create_team to allow players to join.")
+
+# ✅ Referee select
 @router.callback_query(F.data == "be_referee")
-async def be_referee(cb: CallbackQuery):
-    teams = load_json(TEAMS_FILE)
-    if teams.get("referee"):
-        return await cb.answer("Referee already selected!", show_alert=True)
-    teams["referee"] = cb.from_user.id
-    save_json(TEAMS_FILE, teams)
-    await cb.message.edit_text(f"🎩 {cb.from_user.full_name} is now the Referee!\nUse /create_team to create teams.")
+async def set_referee(cb: CallbackQuery):
+    data = load_json(DB_FILE)
+    chat_id = str(cb.message.chat.id)
+    user = cb.from_user.username or cb.from_user.first_name
 
-# ✅ Create Teams (2 min join)
+    if data.get(chat_id, {}).get("referee"):
+        await cb.answer("Referee already selected!", show_alert=True)
+        return
+
+    data[chat_id]["referee"] = user
+    save_json(DB_FILE, data)
+
+    await cb.message.answer(f"👨‍⚖️ Referee: @{user}\n\nUse /create_team to start team joining.")
+
+# ✅ Create Teams (Referee Only)
 @router.message(Command("create_team"))
-async def create_team(msg: types.Message):
-    teams = load_json(TEAMS_FILE)
-    if msg.from_user.id != teams.get("referee"):
-        return await msg.answer("Only Referee can create teams.")
+async def create_team(msg: Message):
+    data = load_json(DB_FILE)
+    chat_id = str(msg.chat.id)
+    user = msg.from_user.username or msg.from_user.first_name
 
-    teams["join_open"] = True
-    teams["join_start_time"] = int(time.time())
-    save_json(TEAMS_FILE, teams)
+    if chat_id not in data or data[chat_id]["referee"] != user:
+        await msg.answer("❌ Only referee can use this command!")
+        return
 
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="Join FOOTBALL TEAM A", callback_data="join_A")],
-        [types.InlineKeyboardButton(text="Join FOOTBALL TEAM B", callback_data="join_B")]
-    ])
-    await msg.answer("🏟️ Teams are open for 2 minutes!\nPlayers, join your team:", reply_markup=kb)
-    asyncio.create_task(close_join_after_time())
+    data[chat_id]["teamA"] = []
+    data[chat_id]["teamB"] = []
+    data[chat_id]["join_start"] = time.time()
+    save_json(DB_FILE, data)
 
-async def close_join_after_time():
-    await asyncio.sleep(JOIN_LIMIT)
-    teams = load_json(TEAMS_FILE)
-    teams["join_open"] = False
-    save_json(TEAMS_FILE, teams)
+    await msg.answer("⏳ 2 minutes to join teams!\nUse /join_football to join Team A or Team B.")
 
-# ✅ Join Team
-@router.callback_query(F.data.startswith("join_"))
-async def join_team(cb: CallbackQuery):
-    teams = load_json(TEAMS_FILE)
-    if not teams.get("join_open") or (int(time.time()) - teams["join_start_time"] > JOIN_LIMIT):
-        return await cb.answer("⏱️ Join window closed! Ask Referee to add you manually.", show_alert=True)
+    # Alerts at 30s & 15s
+    await asyncio.sleep(90)
+    await msg.answer("⚠️ 30 seconds left! Use /join_football to join.")
+    await asyncio.sleep(15)
+    await msg.answer("⚠️ 15 seconds left! Last chance to use /join_football.")
 
-    team = cb.data.split("_")[1]
-    player = {"id": cb.from_user.id, "name": cb.from_user.full_name}
+    await asyncio.sleep(15)
+    await finalize_teams(msg.chat.id, msg)
 
-    if any(p["id"] == cb.from_user.id for p in teams["team_a"] + teams["team_b"]):
-        return await cb.answer("You already joined a team!", show_alert=True)
+# ✅ Join Football Command
+@router.message(Command("join_football"))
+async def join_football(msg: Message):
+    data = load_json(DB_FILE)
+    chat_id = str(msg.chat.id)
+    user = msg.from_user.username or msg.from_user.first_name
 
-    if team == "A":
-        teams["team_a"].append(player)
+    if chat_id not in data or not data[chat_id]["join_start"]:
+        await msg.answer("❌ No active join window!")
+        return
+
+    if time.time() - data[chat_id]["join_start"] > 120:
+        await msg.answer("⏰ Joining closed!")
+        return
+
+    if user in data[chat_id]["teamA"] or user in data[chat_id]["teamB"]:
+        await msg.answer("Already joined a team!")
+        return
+
+    # Alternate join (balance teams automatically)
+    if len(data[chat_id]["teamA"]) <= len(data[chat_id]["teamB"]):
+        data[chat_id]["teamA"].append(user)
+        await msg.answer(f"🔵 @{user} joined Team A")
     else:
-        teams["team_b"].append(player)
+        data[chat_id]["teamB"].append(user)
+        await msg.answer(f"🔴 @{user} joined Team B")
 
-    save_json(TEAMS_FILE, teams)
-    await cb.message.answer(f"✅ {cb.from_user.full_name} joined FOOTBALL TEAM {team}")
+    save_json(DB_FILE, data)
 
-# ✅ Add Member manually
-@router.message(Command("add_member"))
-async def add_member(msg: types.Message):
-    teams = load_json(TEAMS_FILE)
-    if msg.from_user.id != teams.get("referee"):
-        return await msg.answer("Only Referee can add members.")
+# ✅ Finalize Teams
+async def finalize_teams(chat_id, msg_obj):
+    data = load_json(DB_FILE)
+    chat_id = str(chat_id)
 
-    if not msg.entities or len(msg.entities) < 2 or not msg.entities[1].user:
-        return await msg.answer("Usage: /add_member @username A/B")
+    if chat_id not in data:
+        return
 
-    target_id = msg.entities[1].user.id
-    target_name = msg.entities[1].user.full_name
-    dest_team = msg.text.split()[-1].upper()
+    teamA = data[chat_id]["teamA"]
+    teamB = data[chat_id]["teamB"]
 
-    if dest_team not in ["A", "B"]:
-        return await msg.answer("Destination must be A or B.")
+    if len(teamA) != len(teamB) or len(teamA) == 0:
+        await msg_obj.answer("⚠️ Teams not balanced or empty! Restart with /create_team.")
+        return
 
-    if any(p["id"] == target_id for p in teams["team_a"] + teams["team_b"]):
-        return await msg.answer("Player already in a team.")
+    # Auto-assign first players as captains
+    if teamA: data[chat_id]["captains"]["A"] = teamA[0]
+    if teamB: data[chat_id]["captains"]["B"] = teamB[0]
 
-    teams[f"team_{dest_team.lower()}"].append({"id": target_id, "name": target_name})
-    save_json(TEAMS_FILE, teams)
-    await msg.answer(f"➕ {target_name} added to FOOTBALL TEAM {dest_team} by Referee.")
+    # Auto-assign second players as GK if exist
+    if len(teamA) > 1: data[chat_id]["goalkeepers"]["A"] = teamA[1]
+    if len(teamB) > 1: data[chat_id]["goalkeepers"]["B"] = teamB[1]
 
-# ✅ Shift Member Auto Opposite
-@router.message(Command("shift_member"))
-async def shift_member(msg: types.Message):
-    teams = load_json(TEAMS_FILE)
-    if msg.from_user.id != teams.get("referee"):
-        return await msg.answer("Only Referee can shift members.")
+    save_json(DB_FILE, data)
 
-    if not msg.entities or len(msg.entities) < 2 or not msg.entities[1].user:
-        return await msg.answer("Usage: /shift_member @username")
+    listA = "\n".join([f"🔵 {p}{' (C)' if p == data[chat_id]['captains'].get('A') else ''}{' (GK)' if p == data[chat_id]['goalkeepers'].get('A') else ''}" for p in teamA])
+    listB = "\n".join([f"🔴 {p}{' (C)' if p == data[chat_id]['captains'].get('B') else ''}{' (GK)' if p == data[chat_id]['goalkeepers'].get('B') else ''}" for p in teamB])
 
-    target_id = msg.entities[1].user.id
-    target_name = msg.entities[1].user.full_name
+    msg = await msg_obj.answer(f"🏟️ <b>Teams Finalized</b>\n\n<b>Team A</b>:\n{listA}\n\n<b>Team B</b>:\n{listB}")
+    await msg.pin()
 
-    if any(p["id"] == target_id for p in teams["team_a"]):
-        teams["team_a"] = [p for p in teams["team_a"] if p["id"] != target_id]
-        teams["team_b"].append({"id": target_id, "name": target_name})
-        dest = "B"
-    elif any(p["id"] == target_id for p in teams["team_b"]):
-        teams["team_b"] = [p for p in teams["team_b"] if p["id"] != target_id]
-        teams["team_a"].append({"id": target_id, "name": target_name})
-        dest = "A"
-    else:
-        return await msg.answer("Player is not in any team.")
+# ✅ Change Captain
+@router.message(Command("set_captain"))
+async def set_captain(msg: Message):
+    args = msg.text.split()
+    if len(args) < 3:
+        await msg.answer("Usage: /set_captain A @username")
+        return
 
-    save_json(TEAMS_FILE, teams)
-    await msg.answer(f"🔄 {target_name} shifted to FOOTBALL TEAM {dest}")
+    data = load_json(DB_FILE)
+    chat_id = str(msg.chat.id)
+    team = args[1].upper()
+    user = args[2].replace("@", "")
+
+    if team not in ["A", "B"]:
+        await msg.answer("Team must be A or B!")
+        return
+
+    data[chat_id]["captains"][team] = user
+    save_json(DB_FILE, data)
+    await msg.answer(f"✅ @{user} is now Captain of Team {team}")
+
+# ✅ Change Goalkeeper
+@router.message(Command("set_gk"))
+async def set_gk(msg: Message):
+    args = msg.text.split()
+    if len(args) < 3:
+        await msg.answer("Usage: /set_gk A @username")
+        return
+
+    data = load_json(DB_FILE)
+    chat_id = str(msg.chat.id)
+    team = args[1].upper()
+    user = args[2].replace("@", "")
+
+    if team not in ["A", "B"]:
+        await msg.answer("Team must be A or B!")
+        return
+
+    data[chat_id]["goalkeepers"][team] = user
+    save_json(DB_FILE, data)
+    await msg.answer(f"✅ @{user} is now Goalkeeper of Team {team}")
