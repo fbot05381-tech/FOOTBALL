@@ -1,71 +1,122 @@
-import asyncio, random, logging
+import asyncio
+import random
+import time
 from aiogram import types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from utils.db import read_json, write_json, MATCH_DB, PLAYER_DB
-from utils.reminder import reminder_loop, stop_reminder, pause_reminder, resume_reminder
-from utils.rate_limit import can_use_command
+from utils.rate_limit import check_cooldown
 
-match_data = {"active": False, "paused": False, "score": {"A": 0, "B": 0}, "players": {"A": [], "B": []}, "goals": {}, "assists": {}}
+COOLDOWN_GIF = "CgACAgQAAxkBAANHZCoolDownGIFID"  # अपनी GIF का file_id डालना
 
-def get_scoreboard():
-    score_text = f"🏆 Score:\nA: {match_data['score']['A']} | B: {match_data['score']['B']}"
-    gif_id = "CgACAgQAAxkBAAEB12345GIFexample"
-    return score_text, gif_id
+# Nearby vs Far logic के लिए helper
+def get_nearby_and_far(players, current_player):
+    idx = players.index(current_player)
+    nearby = []
+    far = []
+    for i, p in enumerate(players):
+        if p != current_player:
+            if abs(i - idx) <= 1:
+                nearby.append(p)
+            else:
+                far.append(p)
+    return nearby, far
 
+# Scoreboard HTML
+def generate_scoreboard(match):
+    team_a_score = match.get("team_a_score", 0)
+    team_b_score = match.get("team_b_score", 0)
+    return f"""
+<b>📊 SCOREBOARD</b>
+
+<b>Team A:</b> {team_a_score}
+<b>Team B:</b> {team_b_score}
+"""
+
+# Start Match
 async def start_match(message: types.Message, bot):
-    ok, msg = can_use_command(message.from_user.id, "start")
-    if not ok:
-        return await message.answer(msg)
+    if not await check_cooldown(message.from_user.id, "start", bot, message.chat.id):
+        return
 
-    if match_data["active"]:
-        return await message.answer("⚠️ Match already running!")
+    match = {"team_a": [], "team_b": [], "team_a_score": 0, "team_b_score": 0, "status": "running"}
+    write_json(MATCH_DB, match)
 
-    match_data["active"] = True
-    match_data["paused"] = False
-    match_data["score"] = {"A": 0, "B": 0}
-    write_json(MATCH_DB, match_data)
+    await message.answer("✅ Match Started!\nUse /add_player to add players.")
 
-    await message.answer("✅ Match started!")
-    asyncio.create_task(reminder_loop(bot, message.chat.id, get_scoreboard))
+# Add Player
+async def add_player(message: types.Message, bot):
+    if not await check_cooldown(message.from_user.id, "add", bot, message.chat.id):
+        return
 
-async def pause_game(message: types.Message):
-    ok, msg = can_use_command(message.from_user.id, "pause")
-    if not ok:
-        return await message.answer(msg)
+    match = read_json(MATCH_DB)
+    if not match: return await message.answer("⚠️ Start a match first!")
 
-    if not match_data["active"]:
-        return await message.answer("⚠️ No active match.")
-    match_data["paused"] = True
-    pause_reminder()
-    await message.answer("⏸️ Game paused.")
+    if message.entities and message.entities[0].type == "mention":
+        username = message.text.split()[1]
+    elif message.reply_to_message:
+        username = f"@{message.reply_to_message.from_user.username}"
+    else:
+        username = f"@{message.from_user.username}"
 
-async def resume_game(message: types.Message):
-    ok, msg = can_use_command(message.from_user.id, "resume")
-    if not ok:
-        return await message.answer(msg)
+    # Alternate Team Assignment
+    if len(match["team_a"]) <= len(match["team_b"]):
+        match["team_a"].append(username)
+    else:
+        match["team_b"].append(username)
 
-    if not match_data["active"]:
-        return await message.answer("⚠️ No active match.")
-    match_data["paused"] = False
-    resume_reminder()
-    await message.answer("▶️ Game resumed.")
+    write_json(MATCH_DB, match)
+    await message.answer(f"👤 {username} added to the match!")
 
-async def end_match(message: types.Message):
-    ok, msg = can_use_command(message.from_user.id, "end")
-    if not ok:
-        return await message.answer(msg)
+# Remove Player A
+async def remove_player_a(message: types.Message):
+    match = read_json(MATCH_DB)
+    if not match: return await message.answer("⚠️ No active match.")
 
-    if not match_data["active"]:
-        return await message.answer("⚠️ No match running.")
-    stop_reminder()
-    match_data["active"] = False
-    write_json(MATCH_DB, match_data)
-    await message.answer("🏁 Match ended! Stats saved.")
+    try:
+        num = int(message.text.split()[1]) - 1
+        removed = match["team_a"].pop(num)
+        write_json(MATCH_DB, match)
+        await message.answer(f"❌ Removed {removed} from Team A")
+    except:
+        await message.answer("⚠️ Invalid player number.")
 
-async def score_command(message: types.Message):
-    ok, msg = can_use_command(message.from_user.id, "score")
-    if not ok:
-        return await message.answer(msg)
+# Remove Player B
+async def remove_player_b(message: types.Message):
+    match = read_json(MATCH_DB)
+    if not match: return await message.answer("⚠️ No active match.")
 
-    scoreboard_text, gif_id = get_scoreboard()
-    await message.answer_animation(animation=gif_id, caption=f"📊 Current Score:\n\n{scoreboard_text}")
+    try:
+        num = int(message.text.split()[1]) - 1
+        removed = match["team_b"].pop(num)
+        write_json(MATCH_DB, match)
+        await message.answer(f"❌ Removed {removed} from Team B")
+    except:
+        await message.answer("⚠️ Invalid player number.")
+
+# Pause Match
+async def pause_game(message: types.Message, bot):
+    match = read_json(MATCH_DB)
+    if not match: return await message.answer("⚠️ No active match.")
+    match["status"] = "paused"
+    write_json(MATCH_DB, match)
+    sent = await message.answer("⏸️ Game Paused by Referee")
+    await bot.pin_chat_message(message.chat.id, sent.message_id)
+
+# Resume Match
+async def resume_game(message: types.Message, bot):
+    match = read_json(MATCH_DB)
+    if not match: return await message.answer("⚠️ No active match.")
+    match["status"] = "running"
+    write_json(MATCH_DB, match)
+    sent = await message.answer("▶️ Game Resumed")
+    await bot.pin_chat_message(message.chat.id, sent.message_id)
+
+# Scoreboard Command
+async def show_score(message: types.Message, bot):
+    if not await check_cooldown(message.from_user.id, "score", bot, message.chat.id):
+        return
+
+    match = read_json(MATCH_DB)
+    if not match: return await message.answer("⚠️ No active match.")
+
+    scoreboard = generate_scoreboard(match)
+    await bot.send_animation(message.chat.id, animation=COOLDOWN_GIF, caption=scoreboard, parse_mode="HTML")
