@@ -1,15 +1,39 @@
-import json, os
+import os
+import json
 
-def load_json(file):
-    if not os.path.exists(file):
-        return {}
-    with open(file, "r") as f:
-        try:
-            return json.load(f)
-        except:
-            return {}
+# ✅ Database folder & file paths
+DB_FOLDER = "database"
+DB_FILE = os.path.join(DB_FOLDER, "data.json")
 
-def save_json(file, data):
-    os.makedirs(os.path.dirname(file), exist_ok=True)
-    with open(file, "w") as f:
-        json.dump(data, f, indent=2)
+# ✅ Initialize DB (create folder & file if not exist)
+def init_db():
+    if not os.path.exists(DB_FOLDER):
+        os.makedirs(DB_FOLDER)
+    if not os.path.exists(DB_FILE):
+        with open(DB_FILE, "w") as f:
+            json.dump({}, f)
+
+# ✅ Read data from DB
+def read_db():
+    if not os.path.exists(DB_FILE):
+        init_db()
+    with open(DB_FILE, "r") as f:
+        return json.load(f)
+
+# ✅ Write data to DB
+def write_db(data):
+    if not os.path.exists(DB_FILE):
+        init_db()
+    with open(DB_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+# ✅ Update a specific key in DB
+def update_db(key, value):
+    data = read_db()
+    data[key] = value
+    write_db(data)
+
+# ✅ Get value of a specific key
+def get_db_value(key, default=None):
+    data = read_db()
+    return data.get(key, default)
