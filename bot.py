@@ -1,4 +1,4 @@
-import os, asyncio, importlib
+import os, asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.types import Message
@@ -12,11 +12,11 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
-# ✅ Register routers
+# ✅ Include routers
 dp.include_router(team_router)
 dp.include_router(tournament_router)
 
-# ✅ Start command with mode selection
+# ✅ Start Command
 @dp.message(CommandStart())
 async def start_command(msg: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -25,7 +25,7 @@ async def start_command(msg: Message):
     ])
     await msg.answer("Welcome to Football Bot!\nChoose a mode:", reply_markup=kb)
 
-# ✅ Background tasks (Reminder Loop)
+# ✅ Background Reminder Task
 async def on_startup():
     asyncio.create_task(reminder_loop(bot))
 
