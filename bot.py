@@ -1,52 +1,38 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
-from aiogram.fsm.storage.memory import MemoryStorage
-
+from aiogram.types import Message
 from config import BOT_TOKEN
-from handlers import match_engine, tournament_mode
+from handlers import match_engine
 from utils.db import init_db
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher(storage=MemoryStorage())
+dp = Dispatcher()
 
-# ✅ Register Routers
-dp.include_router(match_engine.router)
-dp.include_router(tournament_mode.router)
-
-async def set_commands():
-    commands = [
-        BotCommand(command="start_match", description="⚽ Start the football match"),
-        BotCommand(command="pause_game", description="⏸ Pause current game"),
-        BotCommand(command="resume_game", description="▶ Resume paused game"),
-        BotCommand(command="score", description="📊 Show current score"),
-        BotCommand(command="time", description="⏱ Show match time left"),
-        BotCommand(command="end_match", description="🏁 End current match"),
-    ]
-    await bot.set_my_commands(commands)
+# ✅ Reminder loop define
+async def reminder_loop():
+    while True:
+        await asyncio.sleep(300)  # हर 5 मिनट में reminder logic
+        # यहाँ future reminder logic डाल सकते हो
 
 async def on_startup():
     logger.info("📂 Initializing database...")
-    try:
-        await init_db()
-        logger.info("✅ Database initialized.")
-    except Exception as e:
-        logger.error(f"❌ DB Init Error: {e}")
+    await init_db()
+    logger.info("✅ Database initialized.")
+    asyncio.create_task(reminder_loop())
 
-    # ✅ Reminder loop check
-    try:
-        from handlers.tournament_mode import reminder_loop
-        asyncio.create_task(reminder_loop(bot))
-    except ImportError:
-        logger.warning("⚠️ reminder_loop not found, skipping...")
-
-    await set_commands()
-    logger.info("🤖 Bot started successfully!")
+# ✅ Commands Register
+dp.message.register(match_engine.start_match, F.text.startswith("/start_match"))
+dp.message.register(match_engine.add_player, F.text.startswith("/add_player"))
+dp.message.register(match_engine.remove_player_a, F.text.startswith("/remove_player_A"))
+dp.message.register(match_engine.remove_player_b, F.text.startswith("/remove_player_B"))
+dp.message.register(match_engine.pause_game, F.text.startswith("/pause_game"))
+dp.message.register(match_engine.resume_game, F.text.startswith("/resume_game"))
+dp.message.register(match_engine.show_score, F.text.startswith("/score"))
 
 async def main():
     await on_startup()
