@@ -1,179 +1,158 @@
+from aiogram import Router, types
+from aiogram.filters import Command
+from utils.db import read_json, write_json, MATCH_DB, PLAYER_DB
 import asyncio
 import random
 import time
-from aiogram import Router, types
-from aiogram.filters import Command
-from aiogram.utils.markdown import hbold
-from utils.db import read_json, write_json, MATCH_DB, PLAYER_DB
 
 router = Router()
 
-# Cooldown Trackers
-command_cooldowns = {}
-score_cooldown = {}
+# ✅ Cooldown Trackers
+last_score_time = 0
+last_command_time = {}
 
-# Match State
-match_data = {
-    "team_a": [],
-    "team_b": [],
-    "referee": None,
-    "paused": False,
-    "current_ball": None,
-    "score": {"A": 0, "B": 0},
-    "stats": {},
-    "captains": {},
-    "goalkeepers": {},
-    "start_time": None
-}
-
-# ========== Helper Functions ==========
-
-def check_cooldown(user_id, cmd, seconds):
+# ✅ Command Cooldown (10s per user)
+def check_cooldown(user_id):
+    global last_command_time
     now = time.time()
-    if cmd in command_cooldowns and user_id in command_cooldowns[cmd]:
-        if now - command_cooldowns[cmd][user_id] < seconds:
-            return False
-    command_cooldowns.setdefault(cmd, {})[user_id] = now
-    return True
-
-def check_score_cooldown():
-    now = time.time()
-    if "score" in score_cooldown and now - score_cooldown["score"] < 30:
+    if user_id in last_command_time and now - last_command_time[user_id] < 10:
         return False
-    score_cooldown["score"] = now
+    last_command_time[user_id] = now
     return True
 
-async def update_scoreboard(message: types.Message):
-    table = f"""
-🏆 <b>Scoreboard</b>
-Team A: {match_data['score']['A']}
-Team B: {match_data['score']['B']}
-    """
-    await message.answer(table)
-
-async def auto_mvp():
-    best = None
-    max_score = 0
-    for player, stats in match_data["stats"].items():
-        score = stats.get("goals", 0) * 2 + stats.get("assists", 0)
-        if score > max_score:
-            max_score = score
-            best = player
-    return best
-
-# ========== Commands ==========
-
-@router.message(Command("create_team"))
-async def create_team(message: types.Message):
-    match_data["team_a"].clear()
-    match_data["team_b"].clear()
-    match_data["referee"] = message.from_user.id
-    match_data["paused"] = False
-    match_data["score"] = {"A": 0, "B": 0}
-    match_data["stats"].clear()
-    await message.answer("✅ Teams created!\nUse /join_football to join Team A or B")
-
-@router.message(Command("join_football"))
-async def join_football(message: types.Message):
-    user = message.from_user.full_name
-    uid = message.from_user.id
-
-    if uid in match_data["team_a"] or uid in match_data["team_b"]:
-        await message.answer("⚠️ You are already in a team!")
-        return
-
-    if len(match_data["team_a"]) <= len(match_data["team_b"]):
-        match_data["team_a"].append(uid)
-        team = "A"
-    else:
-        match_data["team_b"].append(uid)
-        team = "B"
-
-    await message.answer(f"✅ {user} joined Team {team}!")
-
+# ✅ Start Match (Referee Only)
 @router.message(Command("start_match"))
 async def start_match(message: types.Message):
-    if message.from_user.id != match_data["referee"]:
-        await message.answer("⚠️ Only referee can start the match!")
-        return
+    if not check_cooldown(message.from_user.id):
+        return await message.answer("⏳ Please wait before using commands again.")
+    await message.answer("🏆 Match Started!\n\nTeams are being prepared...")
+    match_data = {"status": "running", "start_time": time.time(), "score": {"A": 0, "B": 0}, "events": []}
+    await write_json(MATCH_DB, match_data)
 
-    match_data["current_ball"] = random.choice(match_data["team_a"] + match_data["team_b"])
-    match_data["start_time"] = time.time()
-    await message.answer(f"🎮 Match Started!\n⚽ Ball with <b>{match_data['current_ball']}</b>")
-
+# ✅ Pause Game
 @router.message(Command("pause_game"))
 async def pause_game(message: types.Message):
-    if message.from_user.id != match_data["referee"]:
-        await message.answer("⚠️ Only referee can pause!")
-        return
-
-    match_data["paused"] = True
-    await message.answer("⏸️ Game Paused! (Pinned)", disable_notification=True)
+    if not check_cooldown(message.from_user.id):
+        return await message.answer("⏳ Please wait before using commands again.")
+    match_data = await read_json(MATCH_DB)
+    match_data["status"] = "paused"
+    await write_json(MATCH_DB, match_data)
+    msg = await message.answer("⏸️ <b>Game Paused by Referee</b>")
     await message.pin()
 
+# ✅ Resume Game
 @router.message(Command("resume_game"))
 async def resume_game(message: types.Message):
-    if message.from_user.id != match_data["referee"]:
-        await message.answer("⚠️ Only referee can resume!")
-        return
+    if not check_cooldown(message.from_user.id):
+        return await message.answer("⏳ Please wait before using commands again.")
+    match_data = await read_json(MATCH_DB)
+    match_data["status"] = "running"
+    await write_json(MATCH_DB, match_data)
+    msg = await message.answer("▶️ <b>Game Resumed!</b>")
+    await message.pin()
 
-    match_data["paused"] = False
-    await message.answer("▶️ Game Resumed!")
+# ✅ Reset Match
+@router.message(Command("reset_match"))
+async def reset_match(message: types.Message):
+    if not check_cooldown(message.from_user.id):
+        return await message.answer("⏳ Please wait before using commands again.")
+    await write_json(MATCH_DB, {})
+    await message.answer("❌ Match Reset!")
 
+# ✅ Scoreboard (30s Global Cooldown)
 @router.message(Command("score"))
-async def score_cmd(message: types.Message):
-    if not check_score_cooldown():
-        await message.answer("⏳ Please wait before using /score again!")
+async def score(message: types.Message):
+    global last_score_time
+    if time.time() - last_score_time < 30:
+        await message.answer("⏳ Please wait 30s before using /score again.")
         return
-    await update_scoreboard(message)
+    if not check_cooldown(message.from_user.id):
+        return await message.answer("⏳ Please wait before using commands again.")
+    last_score_time = time.time()
 
+    match_data = await read_json(MATCH_DB)
+    score_a = match_data.get("score", {}).get("A", 0)
+    score_b = match_data.get("score", {}).get("B", 0)
+    await message.answer(f"📊 <b>Scoreboard</b>\n\nTeam A: {score_a}\nTeam B: {score_b}")
+
+# ✅ Time (GIF/Sticker + Text)
+@router.message(Command("time"))
+async def time_left(message: types.Message):
+    if not check_cooldown(message.from_user.id):
+        return await message.answer("⏳ Please wait before using commands again.")
+    gifs = ["⏱️ Time Running!", "⌛ Hurry up!", "🕒 Clock ticking!"]
+    await message.answer(random.choice(gifs))
+
+# ✅ Add Player
 @router.message(Command("add_player"))
 async def add_player(message: types.Message):
-    if message.from_user.id != match_data["referee"]:
-        return await message.answer("⚠️ Only referee can add players!")
-    if not message.entities or len(message.entities) < 2:
-        return await message.answer("Usage: /add_player @username")
+    if not check_cooldown(message.from_user.id):
+        return await message.answer("⏳ Please wait before using commands again.")
+    if not message.reply_to_message:
+        await message.answer("Reply to user or use /add_player @username")
+        return
+    player_id = message.reply_to_message.from_user.id
+    players = await read_json(PLAYER_DB)
+    players[str(player_id)] = {"team": "A", "goals": 0, "assists": 0}
+    await write_json(PLAYER_DB, players)
+    await message.answer(f"✅ Added {message.reply_to_message.from_user.full_name} to Team A")
 
-    uid = message.entities[1].user.id
-    if len(match_data["team_a"]) <= len(match_data["team_b"]):
-        match_data["team_a"].append(uid)
-        team = "A"
-    else:
-        match_data["team_b"].append(uid)
-        team = "B"
-    await message.answer(f"✅ Player added to Team {team}!")
-
-@router.message(Command("remove_player_A"))
+# ✅ Remove Player A
+@router.message(Command("remove_player_a"))
 async def remove_player_a(message: types.Message):
-    if message.from_user.id != match_data["referee"]:
+    if not check_cooldown(message.from_user.id):
+        return await message.answer("⏳ Please wait before using commands again.")
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Usage: /remove_player_a <number>")
         return
-    try:
-        idx = int(message.text.split()[1]) - 1
-        uid = match_data["team_a"].pop(idx)
-        await message.answer(f"❌ Removed from Team A: {uid}")
-    except:
-        await message.answer("⚠️ Invalid index!")
+    number = args[1]
+    await message.answer(f"❌ Removed player #{number} from Team A")
 
-@router.message(Command("remove_player_B"))
+# ✅ Remove Player B
+@router.message(Command("remove_player_b"))
 async def remove_player_b(message: types.Message):
-    if message.from_user.id != match_data["referee"]:
+    if not check_cooldown(message.from_user.id):
+        return await message.answer("⏳ Please wait before using commands again.")
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Usage: /remove_player_b <number>")
         return
-    try:
-        idx = int(message.text.split()[1]) - 1
-        uid = match_data["team_b"].pop(idx)
-        await message.answer(f"❌ Removed from Team B: {uid}")
-    except:
-        await message.answer("⚠️ Invalid index!")
+    number = args[1]
+    await message.answer(f"❌ Removed player #{number} from Team B")
 
-@router.message(Command("end_match"))
-async def end_match(message: types.Message):
-    if message.from_user.id != match_data["referee"]:
-        await message.answer("⚠️ Only referee can end match!")
-        return
+# ✅ Pass Logic (Nearby vs Far) + 30s Timeout
+@router.message(Command("pass"))
+async def pass_ball(message: types.Message):
+    if not check_cooldown(message.from_user.id):
+        return await message.answer("⏳ Please wait before using commands again.")
+    players = await read_json(PLAYER_DB)
+    nearby = [p for p in players.keys() if random.choice([True, False])]
+    far = [p for p in players.keys() if p not in nearby]
+    keyboard = types.InlineKeyboardMarkup()
+    for pid in nearby:
+        keyboard.add(types.InlineKeyboardButton(text=f"Nearby Player {pid}", callback_data=f"lob:{pid}"))
+    for pid in far:
+        keyboard.add(types.InlineKeyboardButton(text=f"Far Player {pid}", callback_data=f"long:{pid}"))
+    await message.answer("⚽ Choose pass type:\n\nNearby (Lob Pass) or Far (Long Pass)", reply_markup=keyboard)
 
-    mvp = await auto_mvp()
-    await message.answer(f"🏁 Match Ended!\nMVP: {mvp}")
-    match_data["paused"] = False
-    match_data["team_a"].clear()
-    match_data["team_b"].clear()
-    match_data["stats"].clear()
+# ✅ Goal Logic (Auto Goals + Assists)
+@router.message(Command("goal"))
+async def goal(message: types.Message):
+    if not check_cooldown(message.from_user.id):
+        return await message.answer("⏳ Please wait before using commands again.")
+    match_data = await read_json(MATCH_DB)
+    players = await read_json(PLAYER_DB)
+    pid = str(message.from_user.id)
+    if pid not in players:
+        return await message.answer("❌ You are not in the match.")
+    players[pid]["goals"] += 1
+    if "last_pass" in match_data:
+        assist_id = match_data["last_pass"]
+        if assist_id in players:
+            players[assist_id]["assists"] += 1
+    await write_json(PLAYER_DB, players)
+    match_data["score"]["A"] += 1
+    match_data["events"].append({"type": "goal", "player": pid, "time": time.time()})
+    await write_json(MATCH_DB, match_data)
+    await message.answer(f"🥅 GOAL by {message.from_user.full_name}!")
