@@ -1,18 +1,15 @@
-# Base image
+# ✅ Base Image
 FROM python:3.10-slim
 
-# Disable Rust dependency build
-ENV CRYPTOGRAPHY_DONT_BUILD_RUST=1
-
-# Work directory
+# ✅ Working Directory
 WORKDIR /app
 
-# Install deps
+# ✅ Install Dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy bot code
+# ✅ Copy Bot Files
 COPY . .
 
-# Run bot
+# ✅ Start Bot (Polling Mode)
 CMD ["python", "bot.py"]
