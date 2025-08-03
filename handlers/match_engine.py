@@ -19,15 +19,13 @@ match_data = {
     "goalkeepers": {},
     "start_time": None,
     "ball_holder": None,
-    "join_message_id": None,
-    "join_task": None
+    "join_message": None
 }
 
 score_cooldown = 0
 command_cooldowns = {}
 
-# ========== Helper Functions ==========
-
+# ===== Helper Functions =====
 async def update_scoreboard(message: types.Message):
     table = f"📊 <b>Match Scoreboard</b>\n\n"
     table += f"🔵 Team A: {match_data['score']['A']}\n"
@@ -44,18 +42,7 @@ async def auto_mvp():
             best = player
     return best or "No MVP"
 
-def can_use_command(uid):
-    now = time.time()
-    if uid not in command_cooldowns:
-        command_cooldowns[uid] = now
-        return True
-    if now - command_cooldowns[uid] >= 10:
-        command_cooldowns[uid] = now
-        return True
-    return False
-
-# ========== Commands ==========
-
+# ===== Referee Commands =====
 @router.message(Command("set_referee"))
 async def set_referee(message: types.Message):
     if message.reply_to_message:
@@ -75,41 +62,32 @@ async def get_referee(message: types.Message):
         return await message.answer("⚠️ No referee set yet!")
     await message.answer(f"👨‍⚖️ Current Referee ID: <code>{ref}</code>")
 
-@router.message(Command("team_mode"))
-async def team_mode(message: types.Message):
-    if match_data["join_task"]:
-        return await message.answer("⚠️ Match already in join phase!")
-
-    msg = await message.answer("🏟 <b>Team Mode Started!</b>\n\n/join_teamA to join Team A\n/join_teamB to join Team B\n\n⏳ You have 2 minutes to join!")
-    match_data["join_message_id"] = msg.message_id
-    match_data["team_a"].clear()
-    match_data["team_b"].clear()
-
-    async def auto_delete():
-        await asyncio.sleep(120)
-        try:
-            await message.bot.delete_message(message.chat.id, msg.message_id)
-        except:
-            pass
-
-    match_data["join_task"] = asyncio.create_task(auto_delete())
-
+# ===== Join Teams with 2 Min Timer =====
 @router.message(Command("join_teamA"))
 async def join_team_a(message: types.Message):
-    uid = message.from_user.id
-    if uid in match_data["team_a"] or uid in match_data["team_b"]:
-        return await message.answer("⚠️ You are already in a team!")
-    match_data["team_a"].append(uid)
-    await message.answer(f"✅ {message.from_user.full_name} joined Team A!")
+    if message.from_user.id in match_data["team_a"] or message.from_user.id in match_data["team_b"]:
+        return await message.answer("⚠️ Already joined a team!")
+    match_data["team_a"].append(message.from_user.id)
+    await message.answer(f"✅ {message.from_user.full_name} joined Team A")
 
 @router.message(Command("join_teamB"))
 async def join_team_b(message: types.Message):
-    uid = message.from_user.id
-    if uid in match_data["team_a"] or uid in match_data["team_b"]:
-        return await message.answer("⚠️ You are already in a team!")
-    match_data["team_b"].append(uid)
-    await message.answer(f"✅ {message.from_user.full_name} joined Team B!")
+    if message.from_user.id in match_data["team_a"] or message.from_user.id in match_data["team_b"]:
+        return await message.answer("⚠️ Already joined a team!")
+    match_data["team_b"].append(message.from_user.id)
+    await message.answer(f"✅ {message.from_user.full_name} joined Team B")
 
+@router.message(Command("open_teams"))
+async def open_teams(message: types.Message):
+    msg = await message.answer("Joining Open for 2 minutes!\nUse /join_teamA or /join_teamB")
+    match_data["join_message"] = msg.message_id
+    await asyncio.sleep(120)
+    try:
+        await message.bot.delete_message(message.chat.id, msg.message_id)
+    except:
+        pass
+
+# ===== Match Controls =====
 @router.message(Command("start_match"))
 async def start_match(message: types.Message):
     if not match_data["referee"]:
@@ -163,5 +141,3 @@ async def end_match(message: types.Message):
     match_data["team_b"].clear()
     match_data["ball_holder"] = None
     match_data["referee"] = None
-    match_data["join_task"] = None
-    match_data["join_message_id"] = None
