@@ -1,61 +1,120 @@
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
-from utils.db import load_json, save_json
+from utils.db import read_db, update_db
 
 router = Router()
-DB_FILE = "database/team_mode.json"
 
-# ✅ End Match with Summary (Referee Only)
-@router.message(Command("end_match"))
-async def end_match(msg: Message):
-    data = load_json(DB_FILE)
+# ✅ Create Teams
+@router.message(Command("create_team"))
+async def create_team(msg: Message):
+    db = read_db()
     chat_id = str(msg.chat.id)
 
-    if chat_id not in data or "referee" not in data[chat_id]:
-        await msg.answer("❌ No active match found!")
+    db[chat_id] = {
+        "referee": msg.from_user.id,
+        "teamA": [],
+        "teamB": [],
+        "captains": {},
+        "goalkeepers": {}
+    }
+
+    update_db(chat_id, db[chat_id])
+    await msg.answer("✅ Teams created!\nPlayers can join using /join_football.")
+
+# ✅ Join Football
+@router.message(Command("join_football"))
+async def join_football(msg: Message):
+    db = read_db()
+    chat_id = str(msg.chat.id)
+
+    if chat_id not in db or "teamA" not in db[chat_id]:
+        await msg.answer("❌ Teams are not created yet. Referee should use /create_team first.")
         return
 
-    match_data = data[chat_id]
-    referee = match_data["referee"]
-    user = msg.from_user.username or msg.from_user.first_name
+    user_id = msg.from_user.id
+    username = msg.from_user.username or msg.from_user.full_name
 
-    if user != referee:
-        await msg.answer("❌ Only referee can end the match!")
+    # Already in team check
+    for p in db[chat_id]["teamA"] + db[chat_id]["teamB"]:
+        if p["id"] == user_id:
+            await msg.answer("⚠️ You are already in a team!")
+            return
+
+    player = {"id": user_id, "name": username}
+
+    if len(db[chat_id]["teamA"]) <= len(db[chat_id]["teamB"]):
+        db[chat_id]["teamA"].append(player)
+        team = "Team A"
+    else:
+        db[chat_id]["teamB"].append(player)
+        team = "Team B"
+
+    update_db(chat_id, db[chat_id])
+    await msg.answer(f"✅ @{username} joined {team}!")
+
+# ✅ Show Teams
+@router.message(Command("show_teams"))
+async def show_teams(msg: Message):
+    db = read_db()
+    chat_id = str(msg.chat.id)
+
+    if chat_id not in db or "teamA" not in db[chat_id]:
+        await msg.answer("❌ Teams not created yet.")
         return
 
-    # ✅ Build Summary
-    team_a = match_data.get("team_a", [])
-    team_b = match_data.get("team_b", [])
-    captain_a = match_data.get("captain_a")
-    captain_b = match_data.get("captain_b")
-    gk_a = match_data.get("gk_a")
-    gk_b = match_data.get("gk_b")
+    text = "🏆 <b>Current Teams</b>\n\n"
 
-    score_a = match_data.get("score_a", 0)
-    score_b = match_data.get("score_b", 0)
+    text += "🔵 <b>Team A:</b>\n"
+    for p in db[chat_id]["teamA"]:
+        tag = " (C)" if p["name"] in db[chat_id]["captains"] else ""
+        gk = " (GK)" if p["name"] in db[chat_id]["goalkeepers"] else ""
+        text += f" - @{p['name']}{tag}{gk}\n"
 
-    def format_team(team, captain, gk):
-        text = ""
-        for p in team:
-            tag = []
-            if p == captain:
-                tag.append("(C)")
-            if p == gk:
-                tag.append("(GK)")
-            text += f"• {p} {' '.join(tag)}\n"
-        return text if text else "No players"
+    text += "\n🔴 <b>Team B:</b>\n"
+    for p in db[chat_id]["teamB"]:
+        tag = " (C)" if p["name"] in db[chat_id]["captains"] else ""
+        gk = " (GK)" if p["name"] in db[chat_id]["goalkeepers"] else ""
+        text += f" - @{p['name']}{tag}{gk}\n"
 
-    summary = (
-        f"🏁 <b>Match Ended</b>\n"
-        f"👤 Referee: {referee}\n\n"
-        f"🏆 <b>Team A</b> ({score_a} goals)\n{format_team(team_a, captain_a, gk_a)}\n"
-        f"🏆 <b>Team B</b> ({score_b} goals)\n{format_team(team_b, captain_b, gk_b)}\n"
-    )
+    await msg.answer(text, parse_mode="HTML")
 
-    await msg.answer(summary)
+# ✅ Set Captain
+@router.message(Command("set_captain"))
+async def set_captain(msg: Message):
+    db = read_db()
+    chat_id = str(msg.chat.id)
 
-    # ✅ Clear Match Data
-    del data[chat_id]
-    save_json(DB_FILE, data)
-    await msg.answer("🛑 All match data cleared. Ready for a new game!")
+    if chat_id not in db:
+        await msg.answer("❌ Teams not created yet.")
+        return
+
+    args = msg.text.split()
+    if len(args) < 2:
+        await msg.answer("⚠️ Usage: /set_captain username")
+        return
+
+    username = args[1].replace("@", "")
+    db[chat_id]["captains"][username] = True
+    update_db(chat_id, db[chat_id])
+    await msg.answer(f"✅ @{username} is now Captain!")
+
+# ✅ Set Goalkeeper
+@router.message(Command("set_gk"))
+async def set_gk(msg: Message):
+    db = read_db()
+    chat_id = str(msg.chat.id)
+
+    if chat_id not in db:
+        await msg.answer("❌ Teams not created yet.")
+        return
+
+    args = msg.text.split()
+    if len(args) < 2:
+        await msg.answer("⚠️ Usage: /set_gk username")
+        return
+
+    username = args[1].replace("@", "")
+    db[chat_id]["goalkeepers"][username] = True
+    update_db(chat_id, db[chat_id])
+    await msg.answer(f"🧤 @{username} is now Goalkeeper!")
