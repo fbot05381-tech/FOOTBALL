@@ -156,6 +156,6 @@ async def points_table(msg: Message):
 
     await msg.answer(text)
 
-# ✅ Dummy Reminder Loop (to avoid import error)
-async def reminder_loop():
+# ✅ Dummy Reminder Loop (with bot arg to avoid error)
+async def reminder_loop(bot=None):
     return
