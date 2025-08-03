@@ -51,6 +51,24 @@ async def create_tournament(message: types.Message):
     tournament_data["stats"].clear()
     await message.answer("✅ Tournament Created!\nPlayers join with /join_tournament")
 
+@router.message(Command("set_referee"))
+async def set_referee(message: types.Message):
+    if message.reply_to_message:
+        ref_id = message.reply_to_message.from_user.id
+        ref_name = message.reply_to_message.from_user.full_name
+    else:
+        ref_id = message.from_user.id
+        ref_name = message.from_user.full_name
+
+    tournament_data["referee"] = ref_id
+    await message.answer(f"👨‍⚖️ Referee set: {ref_name}")
+
+@router.message(Command("get_referee"))
+async def get_referee(message: types.Message):
+    if not tournament_data["referee"]:
+        return await message.answer("⚠️ No referee set yet!")
+    await message.answer(f"👨‍⚖️ Current Referee ID: <code>{tournament_data['referee']}</code>")
+
 @router.message(Command("join_tournament"))
 async def join_tournament(message: types.Message):
     user = message.from_user.full_name
